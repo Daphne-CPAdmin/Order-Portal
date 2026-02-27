@@ -95,7 +95,11 @@ export default function OrderForm() {
   }, [products])();
 
   function setQty(name: string, qty: number) {
-    setCart((prev) => { const m = new Map(prev); qty === 0 ? m.delete(name) : m.set(name, qty); return m; });
+    setCart((prev) => {
+      const m = new Map(prev);
+      if (qty === 0) m.delete(name); else m.set(name, qty);
+      return m;
+    });
   }
 
   // ── Computed ────────────────────────────────────────────────────────────────
@@ -124,7 +128,6 @@ export default function OrderForm() {
   const subtotal = [...subtotalByCat.values()].reduce((a, b) => a + b, 0);
   const handlingTotal = [...handlingByCat.values()].reduce((a, b) => a + b, 0);
   const cosmeticsItems = itemsList.filter((i) => i.product.category === "COSMETICS");
-  const totalCosmetics = cosmeticsItems.reduce((s, i) => s + i.qty, 0);
   // Discount is per-product: ₱100 off for each unit beyond the first 3 of the SAME item
   const cosmeticsDiscount = cosmeticsItems.reduce((s, i) => {
     return s + Math.max(0, i.qty - COSMETICS_BULK_THRESHOLD) * COSMETICS_BULK_DISCOUNT;
