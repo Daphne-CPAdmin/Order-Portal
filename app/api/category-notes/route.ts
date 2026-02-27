@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCategoryNotes, updateCategoryNote } from "@/lib/sheets";
 import { getAdminSession } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const notes = await getCategoryNotes();
