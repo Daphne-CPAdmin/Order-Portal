@@ -128,9 +128,9 @@ export default function OrderForm() {
   const subtotal = [...subtotalByCat.values()].reduce((a, b) => a + b, 0);
   const handlingTotal = [...handlingByCat.values()].reduce((a, b) => a + b, 0);
   const cosmeticsItems = itemsList.filter((i) => i.product.category === "COSMETICS");
-  // Discount is per-product: ₱100 off for each unit beyond the first 3 of the SAME item
+  // Discount is per-product: if qty > 3 of the SAME item, ALL boxes get ₱100 off
   const cosmeticsDiscount = cosmeticsItems.reduce((s, i) => {
-    return s + Math.max(0, i.qty - COSMETICS_BULK_THRESHOLD) * COSMETICS_BULK_DISCOUNT;
+    return s + (i.qty > COSMETICS_BULK_THRESHOLD ? i.qty * COSMETICS_BULK_DISCOUNT : 0);
   }, 0);
   const grandTotal = subtotal + handlingTotal - cosmeticsDiscount;
 
@@ -365,7 +365,7 @@ export default function OrderForm() {
     }`}>
       {cosmeticsDiscount > 0
         ? <>✓ <strong>₱{formatPrice(cosmeticsDiscount)} discount</strong> applied!</>
-        : <>Order &gt;3 of the <strong>same item</strong> for <strong>₱100/box off</strong> each extra</>
+        : <>Order <strong>4+ of the same item</strong> for <strong>₱100 off every box</strong></>
       }
     </div>
   ) : null;
