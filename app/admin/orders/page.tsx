@@ -76,6 +76,7 @@ export default function OrdersPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [quickStatusSaving, setQuickStatusSaving] = useState<OrderStatus | null>(null);
+  const [updatingCatKey, setUpdatingCatKey] = useState<string | null>(null);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -250,6 +251,50 @@ export default function OrdersPage() {
       setPanelError("Network error.");
     } finally {
       setQuickStatusSaving(null);
+    }
+  }
+
+  async function handleCategoryStatus(orderId: string, category: string, status: string) {
+    const catKey = `${orderId}:${category}`;
+    setUpdatingCatKey(catKey);
+    setPanelError("");
+    setPanelSuccess("");
+    try {
+      const res = await fetch(`/api/orders/${orderId}/category-status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, status }),
+      });
+      if (res.ok) {
+        setPanelSuccess(`${category} marked as ${status}.`);
+        setPanelOrder((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            items: prev.items.map((i) =>
+              i.category === category ? { ...i, categoryStatus: status } : i
+            ),
+            status: status === "paid" && prev.items.every((i) => i.category === category || i.categoryStatus === "paid")
+              ? "paid"
+              : status === "waiting" || status === "paid"
+                ? "waiting"
+                : prev.status,
+          };
+        });
+        setOrders((prev) =>
+          prev.map((o) => {
+            if (o.id !== orderId) return o;
+            return { ...o, status: status === "paid" ? "waiting" : o.status };
+          })
+        );
+      } else {
+        const d = await res.json();
+        setPanelError(d.error || "Failed to update.");
+      }
+    } catch {
+      setPanelError("Network error.");
+    } finally {
+      setUpdatingCatKey(null);
     }
   }
 
@@ -508,57 +553,107 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {/* Items */}
+                {/* Items — grouped by category with per-category payment status */}
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Items</p>
-                  <div className="bg-gray-50 rounded-xl overflow-hidden">
-                    {panelOrder.items.map((item) => {
-                      const qty = editQtys[item.id] ?? item.qtyVials;
-                      return (
-                        <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{item.productName}</p>
-                            <p className="text-[10px] text-gray-400">{CATEGORY_EMOJI[item.category] || ""} {item.category} · ₱{formatPrice(item.pricePerVial)}/vial</p>
+                  {(() => {
+                    const itemsByCat = new Map<string, OrderItem[]>();
+                    for (const item of panelOrder.items) {
+                      if (!itemsByCat.has(item.category)) itemsByCat.set(item.category, []);
+                      itemsByCat.get(item.category)!.push(item);
+                    }
+                    return (
+                      <div className="space-y-2">
+                        {[...itemsByCat.entries()].map(([cat, catItems]) => {
+                          const catStatus = catItems[0]?.categoryStatus || "pending";
+                          const catKey = `${panelOrder.id}:${cat}`;
+                          const catSubtotal = catItems.reduce((s, i) => s + (editQtys[i.id] ?? i.qtyVials) * i.pricePerVial, 0);
+                          return (
+                            <div key={cat} className="bg-gray-50 rounded-xl overflow-hidden border border-gray-100">
+                              {/* Category header */}
+                              <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{CATEGORY_EMOJI[cat] || ""} {cat}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                    catStatus === "paid"    ? "bg-blue-100 text-blue-700" :
+                                    catStatus === "waiting" ? "bg-orange-100 text-orange-700" :
+                                    "bg-gray-200 text-gray-500"
+                                  }`}>{catStatus}</span>
+                                  {catStatus !== "paid" && (
+                                    <button
+                                      onClick={() => handleCategoryStatus(panelOrder.id, cat, "paid")}
+                                      disabled={updatingCatKey === catKey}
+                                      className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                    >
+                                      {updatingCatKey === catKey ? "…" : "✅ Mark Paid"}
+                                    </button>
+                                  )}
+                                  {catStatus === "paid" && (
+                                    <button
+                                      onClick={() => handleCategoryStatus(panelOrder.id, cat, "pending")}
+                                      disabled={updatingCatKey === catKey}
+                                      className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                                    >
+                                      {updatingCatKey === catKey ? "…" : "↩ Revert"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Items */}
+                              {catItems.map((item) => {
+                                const qty = editQtys[item.id] ?? item.qtyVials;
+                                return (
+                                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 last:border-0">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-gray-800 truncate">{item.productName}</p>
+                                      <p className="text-[10px] text-gray-400">₱{formatPrice(item.pricePerVial)}/vial</p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        onClick={() => setEditQtys((p) => ({ ...p, [item.id]: Math.max(0, (p[item.id] ?? item.qtyVials) - 1) }))}
+                                        className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center text-sm font-bold leading-none"
+                                      >−</button>
+                                      <span className="text-sm font-semibold w-6 text-center text-gray-900">{qty}</span>
+                                      <button
+                                        onClick={() => setEditQtys((p) => ({ ...p, [item.id]: (p[item.id] ?? item.qtyVials) + 1 }))}
+                                        className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center text-sm font-bold leading-none"
+                                      >+</button>
+                                    </div>
+                                    <p className="text-sm font-semibold text-gray-800 w-16 text-right shrink-0">
+                                      ₱{formatPrice(qty * item.pricePerVial)}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                              <div className="px-4 py-2 bg-white flex justify-between text-xs text-gray-500">
+                                <span>Category subtotal</span>
+                                <span className="font-semibold text-gray-700">₱{formatPrice(catSubtotal)}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {/* Grand total */}
+                        <div className="bg-white rounded-xl px-4 py-3 space-y-1 border border-gray-100">
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>Subtotal</span><span>₱{formatPrice(panelSubtotal)}</span>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => setEditQtys((p) => ({ ...p, [item.id]: Math.max(0, (p[item.id] ?? item.qtyVials) - 1) }))}
-                              className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center text-sm font-bold leading-none"
-                            >−</button>
-                            <span className="text-sm font-semibold w-6 text-center text-gray-900">{qty}</span>
-                            <button
-                              onClick={() => setEditQtys((p) => ({ ...p, [item.id]: (p[item.id] ?? item.qtyVials) + 1 }))}
-                              className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center text-sm font-bold leading-none"
-                            >+</button>
+                          <div className="flex justify-between text-sm font-bold text-gray-900 pt-1">
+                            <span>Grand Total</span>
+                            <span className="text-purple-700">₱{formatPrice(panelOrder.grandTotal || panelSubtotal)}</span>
                           </div>
-                          <p className="text-sm font-semibold text-gray-800 w-16 text-right shrink-0">
-                            ₱{formatPrice(qty * item.pricePerVial)}
-                          </p>
+                          <p className="text-[10px] text-gray-400 font-mono pt-0.5">Order #{panelOrder.id}</p>
+                          <a
+                            href={`/invoice/${panelOrder.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-center text-[10px] text-purple-600 hover:underline mt-1"
+                          >
+                            📄 View Invoice ↗
+                          </a>
                         </div>
-                      );
-                    })}
-
-                    {/* Totals */}
-                    <div className="px-4 py-3 space-y-1 border-t border-gray-200 bg-white">
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>Subtotal</span>
-                        <span>₱{formatPrice(panelSubtotal)}</span>
                       </div>
-                      <div className="flex justify-between text-sm font-bold text-gray-900 pt-1">
-                        <span>Grand Total</span>
-                        <span className="text-purple-700">₱{formatPrice(panelOrder.grandTotal || panelSubtotal)}</span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 font-mono pt-0.5">Order #{panelOrder.id}</p>
-                      <a
-                        href={`/invoice/${panelOrder.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block text-center text-[10px] text-purple-600 hover:underline mt-1"
-                      >
-                        📄 View Invoice ↗
-                      </a>
-                    </div>
-                  </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

@@ -46,6 +46,7 @@ export interface OrderItem {
   pricePerVial: number;
   vialsPerKit: number;
   handlingFee?: number;
+  categoryStatus?: string;
 }
 
 export interface OrderWithItems extends Order {

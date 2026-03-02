@@ -146,7 +146,7 @@ export async function deleteProduct(rowNumber: number): Promise<void> {
 const BATCH_HEADER = [
   "order_date", "id", "order_id", "customer_name", "telegram_username",
   "product_name", "category", "qty_item", "price_per_item",
-  "handling_fee", "category_total", "overall_total", "status",
+  "handling_fee", "category_total", "overall_total", "status", "category_status",
 ];
 
 function pensHandlingFee(n: number): number {
@@ -176,7 +176,7 @@ async function readBatchRows(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${sheetName}!A2:M`,
+      range: `${sheetName}!A2:N`,
     });
     return (res.data.values || []).filter((row) => row[2]); // require order_id column
   } catch {
@@ -214,12 +214,12 @@ async function ensureBatchSheet(
   // Write header row if empty
   const headerRes = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${sheetName}!A1:M1`,
+    range: `${sheetName}!A1:N1`,
   });
   if (!headerRes.data.values || headerRes.data.values.length === 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SHEET_ID,
-      range: `${sheetName}!A1:M1`,
+      range: `${sheetName}!A1:N1`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [BATCH_HEADER] },
     });
@@ -275,6 +275,7 @@ export async function getOrderItems(orderId?: string, batchId?: string): Promise
         pricePerVial: parseFloat(row[8]) || 0,
         vialsPerKit: vialsMap.get(productName) || 1,
         handlingFee: parseFloat(row[9]) || 0, // J: handling_fee (per-category flat fee)
+        categoryStatus: row[13] || "pending",  // N: category_status
       });
     }
     // If orderId specified and we found items, stop searching further sheets
@@ -359,13 +360,14 @@ export async function createOrder(
       categoryTotals[item.category] || 0,               // K: category_total
       computed.grandTotal,                              // L: overall_total
       status,                                           // M: status
+      "pending",                                        // N: category_status
     ]);
 
   if (rows.length === 0) throw new Error("No items with qty > 0");
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
-    range: `${sheetName}!A:M`,
+    range: `${sheetName}!A:N`,
     valueInputOption: "USER_ENTERED",
     requestBody: { values: rows },
   });
@@ -394,7 +396,7 @@ export async function updateOrder(
   for (const sheetName of sheetNames) {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: `${sheetName}!A:M`,
+      range: `${sheetName}!A:N`,
     });
     const allRows = res.data.values || [];
 
@@ -469,10 +471,11 @@ export async function updateOrder(
           : row[10],                                         // K: category_total
         grandTotal !== null ? grandTotal : row[11],          // L: overall_total
         updates.status ?? row[12],                           // M: status
+        row[13] ?? "pending",                                // N: category_status (preserve)
       ];
 
       updateData.push({
-        range: `${sheetName}!A${rowNumber}:M${rowNumber}`,
+        range: `${sheetName}!A${rowNumber}:N${rowNumber}`,
         values: [newRow],
       });
     }
@@ -490,6 +493,70 @@ export async function updateOrder(
     return; // found and updated
   }
 
+  throw new Error(`Order ${orderId} not found in any batch sheet`);
+}
+
+export async function updateCategoryStatus(
+  orderId: string,
+  category: string,
+  newCategoryStatus: string
+): Promise<void> {
+  const sheets = await getSheets();
+  const sheetNames = await getOrderSheetNames(sheets);
+
+  for (const sheetName of sheetNames) {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${sheetName}!A:N`,
+    });
+    const allRows = res.data.values || [];
+
+    const allOrderRows = allRows.filter((row) => row[2] === orderId);
+    if (allOrderRows.length === 0) continue;
+
+    // Derive new overall status from per-category statuses
+    const categoryStatuses = new Map<string, string>();
+    for (const row of allOrderRows) {
+      const cat = row[6];
+      const catSt = cat === category ? newCategoryStatus : (row[13] || "pending");
+      if (!categoryStatuses.has(cat)) categoryStatuses.set(cat, catSt);
+    }
+    const statuses = [...categoryStatuses.values()];
+    let newOverallStatus: OrderStatus;
+    if (statuses.every((s) => s === "paid")) {
+      newOverallStatus = "paid";
+    } else if (statuses.some((s) => s === "waiting" || s === "paid")) {
+      newOverallStatus = "waiting";
+    } else {
+      newOverallStatus = "pending";
+    }
+
+    // Update all rows for this order
+    const updateData: { range: string; values: (string | number)[][] }[] = [];
+    for (let rowIdx = 0; rowIdx < allRows.length; rowIdx++) {
+      const row = allRows[rowIdx];
+      if (row[2] !== orderId) continue;
+      const rowNumber = rowIdx + 1;
+      updateData.push({
+        range: `${sheetName}!A${rowNumber}:N${rowNumber}`,
+        values: [[
+          row[0], row[1], row[2], row[3], row[4],
+          row[5], row[6], row[7], row[8], row[9],
+          row[10], row[11],
+          newOverallStatus,
+          row[6] === category ? newCategoryStatus : (row[13] || "pending"),
+        ]],
+      });
+    }
+
+    if (updateData.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SHEET_ID,
+        requestBody: { valueInputOption: "USER_ENTERED", data: updateData },
+      });
+    }
+    return;
+  }
   throw new Error(`Order ${orderId} not found in any batch sheet`);
 }
 

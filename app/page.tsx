@@ -39,7 +39,7 @@ type LookupOrder = {
   telegramUsername: string;
   orderDate: string;
   status: string;
-  items: { productName: string; category: string; qtyVials: number; pricePerVial: number; vialsPerKit: number }[];
+  items: { productName: string; category: string; qtyVials: number; pricePerVial: number; vialsPerKit: number; categoryStatus?: string }[];
   subtotal: number;
 };
 
@@ -160,8 +160,8 @@ export default function OrderForm() {
   const [lookupTelegram, setLookupTelegram] = useState("");
   const [lookupResult, setLookupResult] = useState<LookupOrder[] | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
-  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
-  const [paidOrderIds, setPaidOrderIds] = useState<Set<string>>(new Set());
+  const [payingCatKey, setPayingCatKey] = useState<string | null>(null);
+  const [paidCatKeys, setPaidCatKeys] = useState<Set<string>>(new Set());
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
 
@@ -289,13 +289,18 @@ export default function OrderForm() {
     finally { setLookupLoading(false); }
   }
 
-  async function handlePay(orderId: string) {
-    setPayingOrderId(orderId);
+  async function handlePay(orderId: string, category: string) {
+    const catKey = `${orderId}:${category}`;
+    setPayingCatKey(catKey);
     try {
-      const res = await fetch(`/api/orders/${orderId}/pay`, { method: "POST" });
-      if (res.ok) setPaidOrderIds((prev) => new Set([...prev, orderId]));
+      const res = await fetch(`/api/orders/${orderId}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category }),
+      });
+      if (res.ok) setPaidCatKeys((prev) => new Set([...prev, catKey]));
     } finally {
-      setPayingOrderId(null);
+      setPayingCatKey(null);
     }
   }
 
@@ -393,84 +398,94 @@ export default function OrderForm() {
                   <div className="space-y-2 max-h-72 overflow-y-auto pb-1">
                     {lookupResult.length === 0 ? (
                       <p className="text-xs text-gray-400 text-center py-3">No orders found for this username.</p>
-                    ) : lookupResult.map((order) => (
-                      <div key={order.id} className="bg-white border border-gray-100 rounded-xl p-3 text-xs shadow-sm">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
-                          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                            order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
-                            order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
-                            order.status === "paid"      ? "bg-blue-100 text-blue-700" :
-                            order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
-                            order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
-                            order.status === "cancelled" ? "bg-red-100 text-red-500" :
-                            "bg-amber-100 text-amber-700"
-                          }`}>{order.status}</span>
-                        </div>
-                        <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
-                        <div className="space-y-0.5 mb-2">
-                          {order.items.map((item) => (
-                            <div key={item.productName} className="flex justify-between text-gray-600">
-                              <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
-                              <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-100 pt-2 mb-2">
-                          <span>Subtotal</span>
-                          <span>₱{formatPrice(order.subtotal)}</span>
-                        </div>
-                        {/* Invoice link */}
-                        <a
-                          href={`/invoice/${order.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors mb-2"
-                        >
-                          📄 View Invoice
-                        </a>
-                        {/* Payment section */}
-                        {(() => {
-                          const orderCategories = [...new Set(order.items.map((i) => i.category))];
-                          const allLocked = orderCategories.length > 0 && orderCategories.every((cat) => categoryLocks[cat]);
-                          if (order.status === "waiting" || paidOrderIds.has(order.id)) {
-                            return (
-                              <div className="w-full text-center text-[11px] text-blue-700 font-semibold py-2.5 rounded-xl bg-blue-50 border border-blue-100 leading-relaxed">
-                                ⏳ Waiting for haul admin to confirm your payment
-                                <br /><span className="font-normal text-blue-400 text-[10px]">We&apos;ll reach out via Telegram shortly.</span>
-                              </div>
-                            );
-                          }
-                          if (order.status === "pending") {
-                            if (!allLocked) {
+                    ) : lookupResult.map((order) => {
+                      const itemsByCat = new Map<string, typeof order.items>();
+                      for (const item of order.items) {
+                        if (!itemsByCat.has(item.category)) itemsByCat.set(item.category, []);
+                        itemsByCat.get(item.category)!.push(item);
+                      }
+                      return (
+                        <div key={order.id} className="bg-white border border-gray-100 rounded-xl p-3 text-xs shadow-sm">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                              order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
+                              order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
+                              order.status === "paid"      ? "bg-blue-100 text-blue-700" :
+                              order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
+                              order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
+                              order.status === "cancelled" ? "bg-red-100 text-red-500" :
+                              "bg-amber-100 text-amber-700"
+                            }`}>{order.status}</span>
+                          </div>
+                          <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
+                          {/* Per-category sections */}
+                          <div className="space-y-1.5 mb-2">
+                            {[...itemsByCat.entries()].map(([cat, catItems]) => {
+                              const catStatus = catItems[0]?.categoryStatus || "pending";
+                              const catKey = `${order.id}:${cat}`;
+                              const catLocked = categoryLocks[cat];
+                              const catSubtotal = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
                               return (
-                                <div className="text-center text-[10px] text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
-                                  🔒 Payment opens when your categories are locked by admin
+                                <div key={cat} className="bg-gray-50 rounded-lg px-2.5 py-2 border border-gray-100">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold text-gray-600 text-[10px] uppercase tracking-wide">{cat}</span>
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                                      catStatus === "paid"    ? "bg-blue-100 text-blue-700" :
+                                      catStatus === "waiting" ? "bg-orange-100 text-orange-700" :
+                                      "bg-gray-200 text-gray-500"
+                                    }`}>{catStatus}</span>
+                                  </div>
+                                  {catItems.map((item) => (
+                                    <div key={item.productName} className="flex justify-between text-gray-600">
+                                      <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
+                                      <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100 text-[10px]">
+                                    <span>Subtotal</span><span>₱{formatPrice(catSubtotal)}</span>
+                                  </div>
+                                  {order.status !== "cancelled" && order.status !== "fulfilled" && (
+                                    catStatus === "paid" ? (
+                                      <div className="mt-1.5 text-center text-[10px] text-blue-600 font-semibold py-1">✅ Paid</div>
+                                    ) : catStatus === "waiting" || paidCatKeys.has(catKey) ? (
+                                      <div className="mt-1.5 text-center text-[10px] text-orange-600 py-1">⏳ Waiting for confirmation</div>
+                                    ) : catLocked ? (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="bg-purple-50 border border-purple-100 rounded-md px-2 py-1.5 text-[10px] text-purple-800">
+                                          <span className="font-bold">💳 Pay via:</span> GCash · GoTyme · Maya · <span className="font-semibold">09267007491</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePay(order.id, cat)}
+                                          disabled={payingCatKey === catKey}
+                                          className="w-full text-[10px] font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-1.5 rounded-lg transition-colors"
+                                        >
+                                          {payingCatKey === catKey ? "Notifying…" : "✉️ I've sent payment for this"}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="mt-1.5 text-center text-[9px] text-gray-400">🔒 Locked by admin to pay</div>
+                                    )
+                                  )}
                                 </div>
                               );
-                            }
-                            return (
-                              <div className="space-y-2">
-                                <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-[11px] text-purple-800 leading-relaxed">
-                                  <p className="font-bold mb-0.5">💳 Send payment via:</p>
-                                  <p>GCash · GoTyme · Maya</p>
-                                  <p className="font-semibold tracking-wide">09267007491</p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePay(order.id)}
-                                  disabled={payingOrderId === order.id}
-                                  className="w-full text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-2 rounded-xl transition-colors"
-                                >
-                                  {payingOrderId === order.id ? "Notifying admin…" : "✉️ I\u2019ve sent payment — notify admin"}
-                                </button>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
-                    ))}
+                            })}
+                          </div>
+                          <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-100 pt-2 mb-2">
+                            <span>Subtotal</span><span>₱{formatPrice(order.subtotal)}</span>
+                          </div>
+                          <a
+                            href={`/invoice/${order.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors"
+                          >
+                            📄 View Invoice
+                          </a>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -643,84 +658,94 @@ export default function OrderForm() {
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {lookupResult.length === 0 ? (
                       <p className="text-xs text-gray-400 text-center py-3">No orders found for this username.</p>
-                    ) : lookupResult.map((order) => (
-                      <div key={order.id} className="bg-gray-50 rounded-xl p-3 text-xs">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
-                          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                            order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
-                            order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
-                            order.status === "paid"      ? "bg-blue-100 text-blue-700" :
-                            order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
-                            order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
-                            order.status === "cancelled" ? "bg-red-100 text-red-500" :
-                            "bg-amber-100 text-amber-700"
-                          }`}>{order.status}</span>
-                        </div>
-                        <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
-                        <div className="space-y-0.5 mb-2">
-                          {order.items.map((item) => (
-                            <div key={item.productName} className="flex justify-between text-gray-600">
-                              <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
-                              <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-2 mb-2">
-                          <span>Subtotal</span>
-                          <span>₱{formatPrice(order.subtotal)}</span>
-                        </div>
-                        {/* Invoice link */}
-                        <a
-                          href={`/invoice/${order.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors mb-2"
-                        >
-                          📄 View Invoice
-                        </a>
-                        {/* Payment section */}
-                        {(() => {
-                          const orderCategories = [...new Set(order.items.map((i) => i.category))];
-                          const allLocked = orderCategories.length > 0 && orderCategories.every((cat) => categoryLocks[cat]);
-                          if (order.status === "waiting" || paidOrderIds.has(order.id)) {
-                            return (
-                              <div className="w-full text-center text-[11px] text-blue-700 font-semibold py-2.5 rounded-xl bg-blue-50 border border-blue-100 leading-relaxed">
-                                ⏳ Waiting for haul admin to confirm your payment
-                                <br /><span className="font-normal text-blue-400 text-[10px]">We&apos;ll reach out via Telegram shortly.</span>
-                              </div>
-                            );
-                          }
-                          if (order.status === "pending") {
-                            if (!allLocked) {
+                    ) : lookupResult.map((order) => {
+                      const itemsByCat = new Map<string, typeof order.items>();
+                      for (const item of order.items) {
+                        if (!itemsByCat.has(item.category)) itemsByCat.set(item.category, []);
+                        itemsByCat.get(item.category)!.push(item);
+                      }
+                      return (
+                        <div key={order.id} className="bg-gray-50 rounded-xl p-3 text-xs">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                              order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
+                              order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
+                              order.status === "paid"      ? "bg-blue-100 text-blue-700" :
+                              order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
+                              order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
+                              order.status === "cancelled" ? "bg-red-100 text-red-500" :
+                              "bg-amber-100 text-amber-700"
+                            }`}>{order.status}</span>
+                          </div>
+                          <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
+                          {/* Per-category sections */}
+                          <div className="space-y-1.5 mb-2">
+                            {[...itemsByCat.entries()].map(([cat, catItems]) => {
+                              const catStatus = catItems[0]?.categoryStatus || "pending";
+                              const catKey = `${order.id}:${cat}`;
+                              const catLocked = categoryLocks[cat];
+                              const catSubtotal = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
                               return (
-                                <div className="text-center text-[10px] text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
-                                  🔒 Payment opens when your categories are locked by admin
+                                <div key={cat} className="bg-white rounded-lg px-2.5 py-2 border border-gray-100">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-semibold text-gray-600 text-[10px] uppercase tracking-wide">{cat}</span>
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                                      catStatus === "paid"    ? "bg-blue-100 text-blue-700" :
+                                      catStatus === "waiting" ? "bg-orange-100 text-orange-700" :
+                                      "bg-gray-200 text-gray-500"
+                                    }`}>{catStatus}</span>
+                                  </div>
+                                  {catItems.map((item) => (
+                                    <div key={item.productName} className="flex justify-between text-gray-600">
+                                      <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
+                                      <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100 text-[10px]">
+                                    <span>Subtotal</span><span>₱{formatPrice(catSubtotal)}</span>
+                                  </div>
+                                  {order.status !== "cancelled" && order.status !== "fulfilled" && (
+                                    catStatus === "paid" ? (
+                                      <div className="mt-1.5 text-center text-[10px] text-blue-600 font-semibold py-1">✅ Paid</div>
+                                    ) : catStatus === "waiting" || paidCatKeys.has(catKey) ? (
+                                      <div className="mt-1.5 text-center text-[10px] text-orange-600 py-1">⏳ Waiting for confirmation</div>
+                                    ) : catLocked ? (
+                                      <div className="mt-1.5 space-y-1">
+                                        <div className="bg-purple-50 border border-purple-100 rounded-md px-2 py-1.5 text-[10px] text-purple-800">
+                                          <span className="font-bold">💳 Pay via:</span> GCash · GoTyme · Maya · <span className="font-semibold">09267007491</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePay(order.id, cat)}
+                                          disabled={payingCatKey === catKey}
+                                          className="w-full text-[10px] font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-1.5 rounded-lg transition-colors"
+                                        >
+                                          {payingCatKey === catKey ? "Notifying…" : "✉️ I've sent payment for this"}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="mt-1.5 text-center text-[9px] text-gray-400">🔒 Locked by admin to pay</div>
+                                    )
+                                  )}
                                 </div>
                               );
-                            }
-                            return (
-                              <div className="space-y-2">
-                                <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-[11px] text-purple-800 leading-relaxed">
-                                  <p className="font-bold mb-0.5">💳 Send payment via:</p>
-                                  <p>GCash · GoTyme · Maya</p>
-                                  <p className="font-semibold tracking-wide">09267007491</p>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePay(order.id)}
-                                  disabled={payingOrderId === order.id}
-                                  className="w-full text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-2 rounded-xl transition-colors"
-                                >
-                                  {payingOrderId === order.id ? "Notifying admin…" : "✉️ I\u2019ve sent payment — notify admin"}
-                                </button>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
-                    ))}
+                            })}
+                          </div>
+                          <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-2 mb-2">
+                            <span>Subtotal</span><span>₱{formatPrice(order.subtotal)}</span>
+                          </div>
+                          <a
+                            href={`/invoice/${order.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors"
+                          >
+                            📄 View Invoice
+                          </a>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
           qtyVials: i.qtyVials,
           pricePerVial: i.pricePerVial,
           vialsPerKit: i.vialsPerKit,
+          categoryStatus: i.categoryStatus || "pending",
         }));
       const subtotal = items.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
       return {

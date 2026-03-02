@@ -131,6 +131,23 @@ export function buildPaymentNotificationMessage(
   );
 }
 
+export function buildCategoryPaymentMessage(
+  orderId: string,
+  customerName: string,
+  telegramUsername: string,
+  category: string,
+  subtotal: number
+): string {
+  return (
+    `💳 <b>Category Payment — Deej Hauls</b>\n\n` +
+    `👤 <b>${customerName}</b> (${telegramUsername})\n` +
+    `🆔 #${orderId}\n` +
+    `📦 Category: <b>${category}</b>\n` +
+    `💰 Category subtotal: ₱${fmt(subtotal)}\n\n` +
+    `Customer has sent payment for this category.`
+  );
+}
+
 export function buildStatusMessage(
   orderId: string,
   customerName: string,
