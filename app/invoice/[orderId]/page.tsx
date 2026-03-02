@@ -48,6 +48,18 @@ export default function InvoicePage() {
   const [invoice, setInvoice] = useState<InvoiceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [notified, setNotified] = useState(false);
+
+  async function handleNotifyAdmin() {
+    setPaying(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/pay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      if (res.ok) setNotified(true);
+    } finally {
+      setPaying(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/invoice/${orderId}`)
@@ -200,12 +212,6 @@ export default function InvoicePage() {
           </div>
 
           {/* Payment info / status block */}
-          {invoice.status === "waiting" && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-center">
-              <p className="text-blue-700 font-bold text-sm">⏳ Payment Under Review</p>
-              <p className="text-blue-500 text-xs mt-1">Waiting for haul admin to confirm your payment. We&apos;ll reach out on Telegram.</p>
-            </div>
-          )}
           {invoice.status === "paid" && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-center">
               <p className="text-emerald-700 font-bold text-sm">✓ Payment Confirmed</p>
@@ -218,11 +224,25 @@ export default function InvoicePage() {
               <p className="text-purple-500 text-xs mt-1">Your order has been dispatched. Thank you!</p>
             </div>
           )}
-          {invoice.status === "pending" && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-              <p className="text-amber-800 font-bold text-xs mb-1">💳 Send payment via GCash · GoTyme · Maya</p>
-              <p className="font-extrabold text-amber-900 text-base tracking-wide">09267007491</p>
-              <p className="text-amber-600 text-[10px] mt-1">After paying, notify admin from the order portal.</p>
+          {invoice.status === "pending" && !notified && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-3 print:hidden">
+              <div>
+                <p className="text-amber-800 font-bold text-xs mb-1">💳 Send payment via GCash · GoTyme · Maya</p>
+                <p className="font-extrabold text-amber-900 text-base tracking-wide">09267007491</p>
+              </div>
+              <button
+                onClick={handleNotifyAdmin}
+                disabled={paying}
+                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                {paying ? "Notifying admin…" : "✉️ I've sent payment — notify admin"}
+              </button>
+            </div>
+          )}
+          {(invoice.status === "waiting" || notified) && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-center print:hidden">
+              <p className="text-blue-700 font-bold text-sm">⏳ Payment Under Review</p>
+              <p className="text-blue-500 text-xs mt-1">Waiting for haul admin to confirm your payment. We&apos;ll reach out on Telegram.</p>
             </div>
           )}
         </div>

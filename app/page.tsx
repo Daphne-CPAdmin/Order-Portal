@@ -164,6 +164,7 @@ export default function OrderForm() {
   const [paidCatKeys, setPaidCatKeys] = useState<Set<string>>(new Set());
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
+  const [autoLoadedNote, setAutoLoadedNote] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/products")
@@ -302,6 +303,25 @@ export default function OrderForm() {
     } finally {
       setPayingCatKey(null);
     }
+  }
+
+  async function handleTelegramBlur() {
+    const t = normalizeTelegram(telegram);
+    if (!t || !activeBatchId) return;
+    try {
+      const res = await fetch(`/api/orders/lookup?telegram=${encodeURIComponent(t)}`);
+      if (!res.ok) return;
+      const orders: LookupOrder[] = await res.json();
+      const existing = orders.find((o) => o.status === "pending" && o.items.length > 0);
+      if (!existing) return;
+      // Pre-fill cart with existing order items
+      const newCart = new Map<string, number>();
+      for (const item of existing.items) newCart.set(item.productName, item.qtyVials);
+      setCart(newCart);
+      if (!customerName.trim()) setCustomerName(existing.customerName);
+      setIsUpdating(true);
+      setAutoLoadedNote(`Existing order #${existing.id} loaded — your changes will replace it.`);
+    } catch { /* silent */ }
   }
 
   // ── Success ──────────────────────────────────────────────────────────────────
@@ -608,11 +628,18 @@ export default function OrderForm() {
               <input
                 type="text"
                 value={telegram}
-                onChange={(e) => setTelegram(e.target.value)}
+                onChange={(e) => { setTelegram(e.target.value); setAutoLoadedNote(null); setIsUpdating(false); }}
+                onBlur={handleTelegramBlur}
                 placeholder="@username"
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent placeholder:text-gray-300"
               />
             </div>
+            {autoLoadedNote && (
+              <div className="bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-[11px] text-teal-700 flex items-start gap-1.5">
+                <span className="shrink-0">✓</span>
+                <span>{autoLoadedNote}</span>
+              </div>
+            )}
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <button
               type="submit"
