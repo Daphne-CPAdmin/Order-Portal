@@ -5,13 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { OrderStatus, OrderItem } from "@/lib/types";
 
-const STATUS_OPTIONS: OrderStatus[] = ["pending", "confirmed", "delivered", "cancelled"];
+const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "paid", "fulfilled", "cancelled"];
 
-const STATUS_COLORS: Record<OrderStatus, string> = {
-  pending: "bg-yellow-100 text-yellow-700",
-  confirmed: "bg-blue-100 text-blue-700",
-  delivered: "bg-green-100 text-green-700",
+const STATUS_COLORS: Record<string, string> = {
+  pending:   "bg-yellow-100 text-yellow-700",
+  waiting:   "bg-orange-100 text-orange-700",
+  paid:      "bg-blue-100 text-blue-700",
+  fulfilled: "bg-green-100 text-green-700",
   cancelled: "bg-gray-100 text-gray-500",
+  // backwards compat
+  confirmed: "bg-orange-100 text-orange-700",
+  delivered: "bg-green-100 text-green-700",
 };
 
 function formatPrice(n: number) {

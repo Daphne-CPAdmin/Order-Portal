@@ -17,6 +17,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: "/admin/orders", label: "Orders" },
     { href: "/admin/products", label: "Products" },
   ];
+  // Note: Batch management is embedded in the Dashboard page
 
   async function handleLogout() {
     await fetch("/api/auth", { method: "DELETE" });

@@ -3,20 +3,45 @@
 import { useState, useEffect, useCallback } from "react";
 import { Product } from "@/lib/types";
 
-const CATEGORIES = ["USP BAC", "COSMETICS", "SERUMS", "PENS"] as const;
+const CATEGORIES = ["USP BAC", "COSMETICS", "SERUMS", "PENS", "TOPICAL RAWS"] as const;
 type Category = (typeof CATEGORIES)[number];
 
+const MOQ: Partial<Record<Category, { qty: number; unit: string }>> = {
+  "USP BAC":      { qty: 100, unit: "ampoules" },
+  COSMETICS:      { qty: 20,  unit: "boxes" },
+  SERUMS:         { qty: 10,  unit: "kits" },
+  PENS:           { qty: 10,  unit: "pens" },
+  "TOPICAL RAWS": { qty: 20,  unit: "g total" },
+};
+
 const CATEGORY_META: Record<Category, { emoji: string; description: string }> = {
-  "USP BAC": { emoji: "💉", description: "Bacteriostatic water" },
-  COSMETICS:  { emoji: "✨", description: "Skincare & beauty" },
-  SERUMS:     { emoji: "🧪", description: "Peptide serums" },
-  PENS:       { emoji: "🖊️", description: "Injection pens" },
+  "USP BAC":      { emoji: "💉", description: "Bacteriostatic water" },
+  COSMETICS:      { emoji: "✨", description: "Skincare & beauty" },
+  SERUMS:         { emoji: "🧪", description: "Peptide serums" },
+  PENS:           { emoji: "🖊️", description: "Injection pens" },
+  "TOPICAL RAWS": { emoji: "🧴", description: "Topical raw ingredients" },
 };
 
 const MULTI_ITEM_MAX = 10;
 const USP_BAC_MAX = 200;
 const COSMETICS_BULK_THRESHOLD = 3;
 const COSMETICS_BULK_DISCOUNT = 100;
+
+function normalizeTelegram(raw: string): string {
+  return raw.trim().replace(/^@/, "").toLowerCase();
+}
+
+type SlotInfo = { totalVials: number; openSlots: number };
+
+type LookupOrder = {
+  id: string;
+  customerName: string;
+  telegramUsername: string;
+  orderDate: string;
+  status: string;
+  items: { productName: string; category: string; qtyVials: number; pricePerVial: number; vialsPerKit: number }[];
+  subtotal: number;
+};
 
 function pensHandlingFee(n: number) {
   if (n === 0) return 0;
@@ -30,6 +55,12 @@ function uspBacHandlingFee(n: number) {
   return Math.ceil(n / 50) * 50;
 }
 
+function topicalRawsHandlingFee(totalGrams: number, varietiesAt10g: number) {
+  if (totalGrams === 0) return 0;
+  // ₱150 base; +₱50 per variety that reaches 10g
+  return 150 + varietiesAt10g * 50;
+}
+
 function formatPrice(n: number) {
   return n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
@@ -37,7 +68,7 @@ function formatPrice(n: number) {
 function maxQty(product: Product) {
   if (product.vialsPerKit > 1) return product.vialsPerKit;
   if (product.category === "USP BAC") return USP_BAC_MAX;
-  if (product.category === "COSMETICS" || product.category === "PENS") return MULTI_ITEM_MAX;
+  if (product.category === "COSMETICS" || product.category === "PENS" || product.category === "TOPICAL RAWS") return MULTI_ITEM_MAX;
   return 1;
 }
 
@@ -63,6 +94,52 @@ function KitBar({ qty, perKit }: { qty: number; perKit: number }) {
   );
 }
 
+function CommunityBar({ slot, vialsPerKit }: { slot: SlotInfo | undefined; vialsPerKit: number }) {
+  if (vialsPerKit <= 1) return null;
+
+  const totalVials = slot?.totalVials ?? 0;
+  const completedKits = Math.floor(totalVials / vialsPerKit);
+  const partialVials = totalVials % vialsPerKit; // vials reserved in the current in-progress kit
+  const openSlots = vialsPerKit - partialVials;  // always show remaining slots in current kit
+  const currentKit = completedKits + 1;          // the kit currently being filled
+
+  return (
+    <div className="mt-2 space-y-1">
+      {/* Completed kits row */}
+      {completedKits > 0 && (
+        <p className="text-[10px] text-emerald-600 font-semibold leading-none">
+          ✓ {completedKits} complete kit{completedKits !== 1 ? "s" : ""} filled
+        </p>
+      )}
+
+      {/* Current kit progress bar — always shown */}
+      <div className="space-y-0.5">
+        <p className="text-[10px] font-semibold leading-none text-amber-600">
+          {partialVials === 0
+            ? `Kit ${currentKit} — ${openSlots} slot${openSlots !== 1 ? "s" : ""} open`
+            : `Kit ${currentKit} — ${openSlots} slot${openSlots !== 1 ? "s" : ""} left`}
+        </p>
+        {/* Bar: indigo = reserved, emerald = open */}
+        <div className="flex gap-0.5 h-2">
+          {Array.from({ length: vialsPerKit }).map((_, i) => (
+            <div
+              key={i}
+              className={`flex-1 rounded-full ${
+                i < partialVials ? "bg-indigo-400" : "bg-emerald-200"
+              }`}
+            />
+          ))}
+        </div>
+        <p className="text-[10px] leading-none">
+          <span className="text-indigo-500">{partialVials} reserved</span>
+          <span className="text-gray-300 mx-1">·</span>
+          <span className="text-emerald-600 font-semibold">{openSlots} open</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function OrderForm() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,9 +150,20 @@ export default function OrderForm() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [orderId, setOrderId] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [wasUpdate, setWasUpdate] = useState(false);
   const [error, setError] = useState("");
   const [showCart, setShowCart] = useState(false);
   const [categoryNotes, setCategoryNotes] = useState<Record<string, string>>({});
+  const [slotMap, setSlotMap] = useState<Map<string, SlotInfo>>(new Map());
+  const [showLookup, setShowLookup] = useState(false);
+  const [lookupTelegram, setLookupTelegram] = useState("");
+  const [lookupResult, setLookupResult] = useState<LookupOrder[] | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [paidOrderIds, setPaidOrderIds] = useState<Set<string>>(new Set());
+  const [activeBatchId, setActiveBatchId] = useState<string>("");
+  const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetch("/api/products")
@@ -85,6 +173,30 @@ export default function OrderForm() {
     fetch("/api/category-notes")
       .then((r) => r.json())
       .then(setCategoryNotes)
+      .catch(() => {});
+    // Fetch active batch first, then use its ID to scope consolidation slots
+    fetch("/api/batches/active")
+      .then((r) => r.json())
+      .then((batch) => {
+        const batchId = batch?.id || "";
+        if (batchId) {
+          setActiveBatchId(batchId);
+          fetch(`/api/category-locks?batch=${encodeURIComponent(batchId)}`)
+            .then((r) => r.json())
+            .then(setCategoryLocks)
+            .catch(() => {});
+        }
+        const param = batchId ? `?batch=${encodeURIComponent(batchId)}` : "";
+        return fetch(`/api/consolidation${param}`);
+      })
+      .then((r) => r.json())
+      .then((data) => {
+        const m = new Map<string, SlotInfo>();
+        for (const row of data.rows || []) {
+          m.set(row.productName, { totalVials: row.totalVials, openSlots: row.openSlots });
+        }
+        setSlotMap(m);
+      })
       .catch(() => {});
   }, []);
 
@@ -118,10 +230,13 @@ export default function OrderForm() {
 
   const totalPens = itemsList.filter((i) => i.product.category === "PENS").reduce((s, i) => s + i.qty, 0);
   const totalUspBac = itemsList.filter((i) => i.product.category === "USP BAC").reduce((s, i) => s + i.qty, 0);
+  const totalTopicalRaws = itemsList.filter((i) => i.product.category === "TOPICAL RAWS").reduce((s, i) => s + i.qty, 0);
+  const topicalRawsVarieties10g = itemsList.filter((i) => i.product.category === "TOPICAL RAWS" && i.qty >= 10).length;
   const handlingByCat = new Map<string, number>();
   for (const cat of categoriesOrdered) {
     if (cat === "PENS") handlingByCat.set(cat, pensHandlingFee(totalPens));
     else if (cat === "USP BAC") handlingByCat.set(cat, uspBacHandlingFee(totalUspBac));
+    else if (cat === "TOPICAL RAWS") handlingByCat.set(cat, topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g));
     else handlingByCat.set(cat, products.find((p) => p.category === cat)?.handlingFee || 100);
   }
 
@@ -145,17 +260,43 @@ export default function OrderForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerName: customerName.trim(),
-          telegramUsername: telegram.startsWith("@") ? telegram.trim() : `@${telegram.trim()}`,
+          telegramUsername: `@${normalizeTelegram(telegram)}`,
+          batchId: activeBatchId,
           items: itemsList.map(({ product, qty }) => ({
             productName: product.productName, category: product.category,
             qtyVials: qty, pricePerVial: product.pricePerVial, vialsPerKit: product.vialsPerKit,
           })),
+          handlingByCat: Object.fromEntries(handlingByCat),
+          grandTotal,
         }),
       });
-      if (res.ok) { setOrderId((await res.json()).orderId); setSubmitted(true); }
+      if (res.ok) { const data = await res.json(); setOrderId(data.orderId); setWasUpdate(isUpdating); setSubmitted(true); }
       else setError((await res.json()).error || "Failed to submit order.");
     } catch { setError("Network error. Please try again."); }
     finally { setSubmitting(false); }
+  }
+
+  async function handleLookup() {
+    const t = lookupTelegram.trim();
+    if (!t) return;
+    setLookupLoading(true);
+    setLookupResult(null);
+    try {
+      const res = await fetch(`/api/orders/lookup?telegram=${encodeURIComponent(normalizeTelegram(t))}`);
+      if (res.ok) setLookupResult(await res.json());
+      else setLookupResult([]);
+    } catch { setLookupResult([]); }
+    finally { setLookupLoading(false); }
+  }
+
+  async function handlePay(orderId: string) {
+    setPayingOrderId(orderId);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/pay`, { method: "POST" });
+      if (res.ok) setPaidOrderIds((prev) => new Set([...prev, orderId]));
+    } finally {
+      setPayingOrderId(null);
+    }
   }
 
   // ── Success ──────────────────────────────────────────────────────────────────
@@ -163,8 +304,8 @@ export default function OrderForm() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-rose-50 to-pink-50 p-4">
         <div className="bg-white rounded-2xl shadow-lg border border-rose-100 p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-5 text-3xl">🎉</div>
-          <h2 className="text-2xl font-bold tracking-tight text-gray-900 mb-1">Order Received!</h2>
+          <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-5 text-3xl">{wasUpdate ? "✏️" : "🎉"}</div>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900 mb-1">{wasUpdate ? "Order Updated!" : "Order Received!"}</h2>
           <p className="text-gray-500 text-sm mb-1">Thanks, <span className="font-semibold text-gray-700">{customerName}</span>!</p>
           <p className="text-xs text-gray-400 mb-6 font-mono">#{orderId}</p>
           <div className="bg-gray-50 rounded-xl p-4 text-left mb-6 space-y-1">
@@ -190,9 +331,16 @@ export default function OrderForm() {
               </div>
             </div>
           </div>
-          <p className="text-xs text-gray-400">We&apos;ll reach out to you on Telegram ({telegram}).</p>
-          <button onClick={() => { setSubmitted(false); setCart(new Map()); setCustomerName(""); setTelegram(""); }} className="mt-5 text-rose-500 text-sm hover:underline font-medium">
-            Place another order →
+          <p className="text-xs text-gray-400 mb-4">We&apos;ll reach out to you on Telegram ({telegram}).</p>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-left">
+            <p className="text-xs font-bold text-purple-800 mb-1">📲 Register for Telegram reminders</p>
+            <p className="text-xs text-purple-600 leading-relaxed">
+              Send <span className="font-mono font-bold bg-purple-100 px-1 rounded">/start</span> to{" "}
+              <span className="font-semibold">@pephaul_bot</span> to get automatically registered for order updates and payment reminders.
+            </p>
+          </div>
+          <button onClick={() => { setSubmitted(false); setIsUpdating(true); }} className="mt-5 text-rose-500 text-sm hover:underline font-medium">
+            Update my order →
           </button>
         </div>
       </div>
@@ -215,9 +363,117 @@ export default function OrderForm() {
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {itemsList.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-center">
-              <p className="text-2xl mb-2">🛒</p>
-              <p className="text-xs text-gray-400 leading-relaxed">Select items from the<br />catalog to get started.</p>
+            <div className="space-y-4">
+              <div className="flex flex-col items-center text-center pt-4 pb-1">
+                <p className="text-3xl mb-2">🛒</p>
+                <p className="text-sm font-semibold text-gray-700 mb-1">Your cart is empty</p>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Browse the catalog to add items,<br />or track an existing order below.
+                </p>
+              </div>
+              <div className="border-t border-dashed border-gray-100 pt-4 space-y-2">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Track existing order</p>
+                <input
+                  type="text"
+                  placeholder="Your @telegram_username"
+                  value={lookupTelegram}
+                  onChange={(e) => setLookupTelegram(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent placeholder:text-gray-300"
+                />
+                <button
+                  type="button"
+                  onClick={handleLookup}
+                  disabled={lookupLoading || !lookupTelegram.trim()}
+                  className="w-full text-sm font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-100 py-2.5 rounded-xl disabled:opacity-40 transition-colors"
+                >
+                  {lookupLoading ? "Looking up…" : "Find my orders"}
+                </button>
+                {lookupResult !== null && (
+                  <div className="space-y-2 max-h-72 overflow-y-auto pb-1">
+                    {lookupResult.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-3">No orders found for this username.</p>
+                    ) : lookupResult.map((order) => (
+                      <div key={order.id} className="bg-white border border-gray-100 rounded-xl p-3 text-xs shadow-sm">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
+                          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                            order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
+                            order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
+                            order.status === "paid"      ? "bg-blue-100 text-blue-700" :
+                            order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
+                            order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
+                            order.status === "cancelled" ? "bg-red-100 text-red-500" :
+                            "bg-amber-100 text-amber-700"
+                          }`}>{order.status}</span>
+                        </div>
+                        <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
+                        <div className="space-y-0.5 mb-2">
+                          {order.items.map((item) => (
+                            <div key={item.productName} className="flex justify-between text-gray-600">
+                              <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
+                              <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-100 pt-2 mb-2">
+                          <span>Subtotal</span>
+                          <span>₱{formatPrice(order.subtotal)}</span>
+                        </div>
+                        {/* Invoice link */}
+                        <a
+                          href={`/invoice/${order.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors mb-2"
+                        >
+                          📄 View Invoice
+                        </a>
+                        {/* Payment section */}
+                        {(() => {
+                          const orderCategories = [...new Set(order.items.map((i) => i.category))];
+                          const allLocked = orderCategories.length > 0 && orderCategories.every((cat) => categoryLocks[cat]);
+                          if (order.status === "waiting" || paidOrderIds.has(order.id)) {
+                            return (
+                              <div className="w-full text-center text-[11px] text-blue-700 font-semibold py-2.5 rounded-xl bg-blue-50 border border-blue-100 leading-relaxed">
+                                ⏳ Waiting for haul admin to confirm your payment
+                                <br /><span className="font-normal text-blue-400 text-[10px]">We&apos;ll reach out via Telegram shortly.</span>
+                              </div>
+                            );
+                          }
+                          if (order.status === "pending") {
+                            if (!allLocked) {
+                              return (
+                                <div className="text-center text-[10px] text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+                                  🔒 Payment opens when your categories are locked by admin
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="space-y-2">
+                                <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-[11px] text-purple-800 leading-relaxed">
+                                  <p className="font-bold mb-0.5">💳 Send payment via:</p>
+                                  <p>GCash · GoTyme · Maya</p>
+                                  <p className="font-semibold tracking-wide">09267007491</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePay(order.id)}
+                                  disabled={payingOrderId === order.id}
+                                  className="w-full text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-2 rounded-xl transition-colors"
+                                >
+                                  {payingOrderId === order.id ? "Notifying admin…" : "✉️ I\u2019ve sent payment — notify admin"}
+                                </button>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-5">
@@ -234,7 +490,7 @@ export default function OrderForm() {
                     </div>
                     <div className="space-y-1">
                       {catItems.map(({ product, qty }) => {
-                        const showKitHint = product.vialsPerKit > 1 && product.category === "SERUMS";
+                        const showKitHint = product.vialsPerKit > 1 && (product.category === "SERUMS" || product.category === "USP BAC");
                         const rem = qty % product.vialsPerKit;
                         const full = Math.floor(qty / product.vialsPerKit);
                         return (
@@ -317,7 +573,7 @@ export default function OrderForm() {
               )}
               <div className="flex justify-between font-bold text-gray-900 text-sm pt-1">
                 <span>Grand Total</span>
-                <span className="text-rose-600">₱{formatPrice(grandTotal)}</span>
+                <span className="text-purple-700">₱{formatPrice(grandTotal)}</span>
               </div>
             </div>
           )}
@@ -329,7 +585,7 @@ export default function OrderForm() {
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Your full name"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-transparent placeholder:text-gray-300"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent placeholder:text-gray-300"
               />
             </div>
             <div>
@@ -339,18 +595,137 @@ export default function OrderForm() {
                 value={telegram}
                 onChange={(e) => setTelegram(e.target.value)}
                 placeholder="@username"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-transparent placeholder:text-gray-300"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent placeholder:text-gray-300"
               />
             </div>
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <button
               type="submit"
               disabled={submitting || !itemsList.length}
-              className="w-full bg-rose-500 hover:bg-rose-600 disabled:opacity-40 text-white py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-rose-200 disabled:shadow-none"
+              className="w-full bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-purple-200 disabled:shadow-none"
             >
-              {submitting ? "Placing order…" : itemsList.length ? `Place Order · ₱${formatPrice(grandTotal)}` : "Place Order"}
+              {submitting
+                ? (isUpdating ? "Updating order…" : "Placing order…")
+                : itemsList.length
+                  ? `${isUpdating ? "Update Order" : "Place Order"} · ₱${formatPrice(grandTotal)}`
+                  : isUpdating ? "Update Order" : "Place Order"}
             </button>
           </form>
+
+          {/* ── Order lookup ── */}
+          <div className="pt-2 border-t border-gray-50">
+            <button
+              type="button"
+              onClick={() => { setShowLookup(!showLookup); setLookupResult(null); }}
+              className="w-full text-[11px] text-gray-400 hover:text-purple-600 text-left py-1 transition-colors"
+            >
+              {showLookup ? "▲ Hide" : "▾ Check an existing order"}
+            </button>
+            {showLookup && (
+              <div className="mt-2 space-y-2">
+                <input
+                  type="text"
+                  placeholder="@telegram_username"
+                  value={lookupTelegram}
+                  onChange={(e) => setLookupTelegram(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-transparent placeholder:text-gray-300"
+                />
+                <button
+                  type="button"
+                  onClick={handleLookup}
+                  disabled={lookupLoading || !lookupTelegram.trim()}
+                  className="w-full text-xs text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-100 py-2 rounded-lg font-medium disabled:opacity-40 transition-colors"
+                >
+                  {lookupLoading ? "Looking up…" : "Find my orders"}
+                </button>
+                {lookupResult !== null && (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {lookupResult.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-3">No orders found for this username.</p>
+                    ) : lookupResult.map((order) => (
+                      <div key={order.id} className="bg-gray-50 rounded-xl p-3 text-xs">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-gray-700 truncate mr-2">{order.customerName}</span>
+                          <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                            order.status === "waiting"   ? "bg-orange-100 text-orange-700" :
+                            order.status === "confirmed" ? "bg-orange-100 text-orange-700" :
+                            order.status === "paid"      ? "bg-blue-100 text-blue-700" :
+                            order.status === "fulfilled" ? "bg-emerald-100 text-emerald-700" :
+                            order.status === "delivered" ? "bg-emerald-100 text-emerald-700" :
+                            order.status === "cancelled" ? "bg-red-100 text-red-500" :
+                            "bg-amber-100 text-amber-700"
+                          }`}>{order.status}</span>
+                        </div>
+                        <p className="text-gray-400 font-mono text-[10px] mb-2">#{order.id} · {new Date(order.orderDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p>
+                        <div className="space-y-0.5 mb-2">
+                          {order.items.map((item) => (
+                            <div key={item.productName} className="flex justify-between text-gray-600">
+                              <span className="truncate mr-2">{item.productName}{item.qtyVials > 1 ? <span className="text-gray-400"> ×{item.qtyVials}</span> : ""}</span>
+                              <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-2 mb-2">
+                          <span>Subtotal</span>
+                          <span>₱{formatPrice(order.subtotal)}</span>
+                        </div>
+                        {/* Invoice link */}
+                        <a
+                          href={`/invoice/${order.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full text-center text-[11px] text-purple-600 font-semibold py-1.5 rounded-lg border border-purple-100 hover:bg-purple-50 transition-colors mb-2"
+                        >
+                          📄 View Invoice
+                        </a>
+                        {/* Payment section */}
+                        {(() => {
+                          const orderCategories = [...new Set(order.items.map((i) => i.category))];
+                          const allLocked = orderCategories.length > 0 && orderCategories.every((cat) => categoryLocks[cat]);
+                          if (order.status === "waiting" || paidOrderIds.has(order.id)) {
+                            return (
+                              <div className="w-full text-center text-[11px] text-blue-700 font-semibold py-2.5 rounded-xl bg-blue-50 border border-blue-100 leading-relaxed">
+                                ⏳ Waiting for haul admin to confirm your payment
+                                <br /><span className="font-normal text-blue-400 text-[10px]">We&apos;ll reach out via Telegram shortly.</span>
+                              </div>
+                            );
+                          }
+                          if (order.status === "pending") {
+                            if (!allLocked) {
+                              return (
+                                <div className="text-center text-[10px] text-gray-400 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+                                  🔒 Payment opens when your categories are locked by admin
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="space-y-2">
+                                <div className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2 text-[11px] text-purple-800 leading-relaxed">
+                                  <p className="font-bold mb-0.5">💳 Send payment via:</p>
+                                  <p>GCash · GoTyme · Maya</p>
+                                  <p className="font-semibold tracking-wide">09267007491</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePay(order.id)}
+                                  disabled={payingOrderId === order.id}
+                                  className="w-full text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 py-2 rounded-xl transition-colors"
+                                >
+                                  {payingOrderId === order.id ? "Notifying admin…" : "✉️ I\u2019ve sent payment — notify admin"}
+                                </button>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </>
     );
@@ -409,41 +784,82 @@ export default function OrderForm() {
     </div>
   ) : null;
 
+  const topicalRawsNotice = activeCategory === "TOPICAL RAWS" ? (
+    <div className={`rounded-xl px-3 py-2.5 text-[11px] leading-snug ${
+      totalTopicalRaws === 0
+        ? "bg-amber-50 text-amber-700 border border-amber-100"
+        : "bg-teal-50 text-teal-700 border border-teal-100"
+    }`}>
+      {totalTopicalRaws === 0 ? (
+        <>Handling fee: <strong>₱150 base</strong> · <strong>+₱50 per variety at 10g</strong></>
+      ) : (
+        <>
+          <strong>₱{formatPrice(topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g))} handling</strong> for {totalTopicalRaws}g ordered
+          <br /><span className={totalTopicalRaws < 20 ? "text-amber-500 font-semibold" : "text-teal-400"}>
+            {totalTopicalRaws < 20
+              ? `MOQ: ${20 - totalTopicalRaws}g more needed across all items`
+              : topicalRawsVarieties10g > 0
+                ? `${topicalRawsVarieties10g} variet${topicalRawsVarieties10g === 1 ? "y" : "ies"} at 10g · +₱50 each`
+                : `+₱50 per variety at 10g`}
+          </span>
+        </>
+      )}
+    </div>
+  ) : null;
+
   // ── Main layout ─────────────────────────────────────────────────────────────
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#f8f7f5]">
 
       {/* ── Top bar ── */}
-      <header className="h-14 shrink-0 bg-white border-b border-gray-100 flex items-center px-4 lg:px-6 gap-4 shadow-sm z-10">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-rose-500 flex items-center justify-center text-white text-xs font-bold tracking-tight">DH</div>
-          <span className="font-semibold text-gray-900 tracking-tight">Deej Hauls</span>
-          <span className="text-gray-300 text-sm hidden sm:inline">·</span>
-          <span className="text-xs text-gray-400 font-medium hidden sm:inline">Group Order Portal</span>
-        </div>
-        {/* Cart button — mobile only */}
-        <button
-          className="lg:hidden ml-auto flex items-center gap-1.5 bg-rose-500 text-white px-3 py-1.5 rounded-full text-xs font-semibold active:bg-rose-600 transition-colors"
-          onClick={() => setShowCart(true)}
-        >
-          <span>🛒</span>
-          {itemsList.length > 0 ? (
-            <>
-              <span>₱{formatPrice(grandTotal)}</span>
-              <span className="bg-white text-rose-500 rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold">{itemsList.length}</span>
-            </>
-          ) : (
-            <span>Cart</span>
-          )}
-        </button>
-        {/* Desktop cart summary */}
-        {itemsList.length > 0 && (
-          <div className="hidden lg:flex ml-auto items-center gap-3">
-            <span className="text-xs text-gray-400">{itemsList.length} product{itemsList.length !== 1 ? "s" : ""} selected</span>
-            <span className="text-sm font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-full">₱{formatPrice(grandTotal)}</span>
+      <header className="shrink-0 bg-pink-50 border-b border-pink-100 shadow-sm z-10" style={{ background: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 50%, #f5d0fe 100%)" }}>
+        <div className="flex items-center px-4 lg:px-6 gap-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl select-none">🦋</span>
+            <div className="flex flex-col leading-none">
+              <span className="font-extrabold tracking-tight text-purple-900" style={{ fontSize: "1.5rem", letterSpacing: "-0.02em", textShadow: "0 1px 2px rgba(88,28,135,0.12)" }}>
+                Deej Hauls
+              </span>
+              <span className="text-[11px] text-purple-400 font-medium mt-0.5 hidden sm:block">Group Order Portal</span>
+            </div>
+            <span className="text-2xl select-none">🦋</span>
           </div>
-        )}
+          {/* Cart button — mobile only */}
+          <button
+            className="lg:hidden ml-auto flex items-center gap-1.5 bg-purple-600 text-white px-3 py-1.5 rounded-full text-xs font-semibold active:bg-purple-700 transition-colors shadow-sm"
+            onClick={() => setShowCart(true)}
+          >
+            <span>🛒</span>
+            {itemsList.length > 0 ? (
+              <>
+                <span>₱{formatPrice(grandTotal)}</span>
+                <span className="bg-white text-purple-600 rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold">{itemsList.length}</span>
+              </>
+            ) : (
+              <span>Cart</span>
+            )}
+          </button>
+          {/* Desktop cart summary */}
+          {itemsList.length > 0 && (
+            <div className="hidden lg:flex ml-auto items-center gap-3">
+              <span className="text-xs text-purple-400">{itemsList.length} product{itemsList.length !== 1 ? "s" : ""} selected</span>
+              <span className="text-sm font-bold text-purple-700 bg-white/70 border border-purple-100 px-3 py-1 rounded-full">₱{formatPrice(grandTotal)}</span>
+            </div>
+          )}
+        </div>
       </header>
+
+      {/* ── Minimum Order Quantities Banner ── */}
+      <div className="shrink-0 bg-gradient-to-r from-rose-600 to-purple-700 px-4 py-2.5 text-center z-10">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-white/60 mb-1.5">Minimum Order Requirements</p>
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          {(Object.entries(MOQ) as [Category, { qty: number; unit: string }][]).map(([cat, { qty, unit }]) => (
+            <span key={cat} className="bg-white/20 border border-white/30 text-white px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+              {CATEGORY_META[cat].emoji} {cat}: <span className="font-extrabold">{qty} {unit}</span>
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* ── Mobile: horizontal category pills ── */}
       <div className="lg:hidden bg-white border-b border-gray-100 px-4 py-2 flex gap-2 overflow-x-auto shrink-0">
@@ -455,14 +871,14 @@ export default function OrderForm() {
               key={cat}
               onClick={() => setActiveCategory(cat)}
               className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                isActive ? "bg-rose-500 text-white" : "bg-gray-100 text-gray-600 active:bg-gray-200"
+                isActive ? "bg-purple-700 text-white" : "bg-gray-100 text-gray-600 active:bg-gray-200"
               }`}
             >
               <span>{CATEGORY_META[cat].emoji}</span>
               <span>{cat}</span>
               {catQty > 0 && (
                 <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  isActive ? "bg-white text-rose-500" : "bg-rose-100 text-rose-600"
+                  isActive ? "bg-white text-purple-700" : "bg-purple-100 text-purple-700"
                 }`}>{catQty}</span>
               )}
             </button>
@@ -488,17 +904,17 @@ export default function OrderForm() {
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${
-                    isActive ? "bg-rose-50 text-rose-700" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    isActive ? "bg-purple-50 text-purple-800" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   }`}
                 >
                   <span className="text-base leading-none">{meta.emoji}</span>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium leading-none ${isActive ? "text-rose-700" : "text-gray-800"}`}>{cat}</p>
+                    <p className={`text-sm font-medium leading-none ${isActive ? "text-purple-800" : "text-gray-800"}`}>{cat}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5 leading-none truncate">{meta.description}</p>
                   </div>
                   {catQty > 0 && (
                     <span className={`shrink-0 text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center ${
-                      isActive ? "bg-rose-500 text-white" : "bg-rose-100 text-rose-600"
+                      isActive ? "bg-purple-700 text-white" : "bg-purple-100 text-purple-700"
                     }`}>{catQty}</span>
                   )}
                 </button>
@@ -506,11 +922,12 @@ export default function OrderForm() {
             })}
           </nav>
           {/* Category notices in sidebar */}
-          {(cosmeticsNotice || pensNotice || uspBacNotice) && (
+          {(cosmeticsNotice || pensNotice || uspBacNotice || topicalRawsNotice) && (
             <div className="px-3 pb-4 space-y-2">
               {cosmeticsNotice}
               {pensNotice}
               {uspBacNotice}
+              {topicalRawsNotice}
             </div>
           )}
         </aside>
@@ -542,11 +959,12 @@ export default function OrderForm() {
           )}
 
           {/* Category notices (mobile only — desktop shows in sidebar) */}
-          {(cosmeticsNotice || pensNotice || uspBacNotice) && (
+          {(cosmeticsNotice || pensNotice || uspBacNotice || topicalRawsNotice) && (
             <div className="lg:hidden mb-3 space-y-2">
               {cosmeticsNotice}
               {pensNotice}
               {uspBacNotice}
+              {topicalRawsNotice}
             </div>
           )}
 
@@ -559,13 +977,29 @@ export default function OrderForm() {
             </div>
           ) : (catMap.get(activeCategory) || []).length === 0 ? (
             <p className="text-center text-gray-400 py-20 text-sm">No products in this category.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {(catMap.get(activeCategory) || []).map((product) => {
+          ) : (() => {
+            const catProducts = catMap.get(activeCategory) || [];
+            // Group by useCase while preserving insertion order
+            const useCaseGroups = new Map<string, typeof catProducts>();
+            for (const p of catProducts) {
+              const uc = p.useCase || "";
+              if (!useCaseGroups.has(uc)) useCaseGroups.set(uc, []);
+              useCaseGroups.get(uc)!.push(p);
+            }
+            const showHeaders = useCaseGroups.size > 1 || !useCaseGroups.has("");
+            return (
+            <div className="space-y-4">
+              {[...useCaseGroups.entries()].map(([uc, groupProducts]) => (
+                <div key={uc || "__none__"}>
+                  {showHeaders && uc && (
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 px-1">{uc}</p>
+                  )}
+                  <div className="space-y-1.5">
+              {groupProducts.map((product) => {
                 const qty = cart.get(product.productName) || 0;
                 const max = maxQty(product);
-                const useToggle = product.vialsPerKit === 1 && product.category !== "COSMETICS" && product.category !== "PENS" && product.category !== "USP BAC";
-                const showKit = product.vialsPerKit > 1 && product.category === "SERUMS";
+                const useToggle = product.vialsPerKit === 1 && product.category !== "COSMETICS" && product.category !== "PENS" && product.category !== "USP BAC" && product.category !== "TOPICAL RAWS";
+                const showKit = product.vialsPerKit > 1 && (product.category === "SERUMS" || product.category === "USP BAC");
                 const lineTotal = qty * product.pricePerVial;
 
                 return (
@@ -581,6 +1015,9 @@ export default function OrderForm() {
                       <p className={`text-sm font-semibold leading-tight ${qty > 0 ? "text-gray-900" : "text-gray-700"}`}>
                         {product.productName}
                       </p>
+                      {product.productFunction && (
+                        <p className="text-[10px] text-gray-400 leading-tight mt-0.5 italic">{product.productFunction}</p>
+                      )}
                       <div className="flex flex-wrap items-center gap-x-2 mt-0.5">
                         <span className="text-[11px] text-gray-400">
                           ₱{formatPrice(product.pricePerVial)}<span className="text-gray-300">/item</span>
@@ -593,6 +1030,7 @@ export default function OrderForm() {
                         )}
                       </div>
                       {showKit && <KitBar qty={qty} perKit={product.vialsPerKit} />}
+                      {showKit && <CommunityBar slot={slotMap.get(product.productName)} vialsPerKit={product.vialsPerKit} />}
                     </div>
 
                     <div className="w-14 lg:w-20 text-right shrink-0">
@@ -634,8 +1072,12 @@ export default function OrderForm() {
                   </div>
                 );
               })}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
+            );
+          })()}
         </main>
 
         {/* ── Right: Order summary (desktop only) ── */}
@@ -649,7 +1091,7 @@ export default function OrderForm() {
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 py-3 z-20 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
         <button
           onClick={() => setShowCart(true)}
-          className="w-full bg-rose-500 text-white py-3 rounded-xl text-sm font-semibold flex items-center justify-between px-4 active:bg-rose-600 transition-colors"
+          className="w-full bg-purple-700 text-white py-3 rounded-xl text-sm font-semibold flex items-center justify-between px-4 active:bg-purple-800 transition-colors"
         >
           <span className="flex items-center gap-2">
             🛒

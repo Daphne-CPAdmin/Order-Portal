@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Product } from "@/lib/types";
 
-const CATEGORY_OPTIONS = ["USP BAC", "COSMETICS", "SERUMS", "PENS"];
+const CATEGORY_OPTIONS = ["USP BAC", "COSMETICS", "SERUMS", "PENS", "TOPICAL RAWS"];
 
 function formatPrice(n: number) {
   return n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -17,6 +17,8 @@ const EMPTY_FORM = {
   vialsPerKit: "10",
   handlingFee: "100",
   active: true,
+  useCase: "",
+  productFunction: "",
 };
 
 export default function ProductsPage() {
@@ -102,6 +104,8 @@ export default function ProductsPage() {
       vialsPerKit: String(product.vialsPerKit),
       handlingFee: String(product.handlingFee),
       active: product.active,
+      useCase: product.useCase || "",
+      productFunction: product.productFunction || "",
     });
     setError("");
     setSuccess("");
@@ -120,6 +124,8 @@ export default function ProductsPage() {
       vialsPerKit: parseInt(form.vialsPerKit) || 1,
       handlingFee: parseFloat(form.handlingFee) || 100,
       active: form.active,
+      useCase: form.useCase.trim(),
+      productFunction: form.productFunction.trim(),
     };
 
     if (!payload.productName) {
@@ -265,63 +271,86 @@ export default function ProductsPage() {
               </div>
               {items.length === 0 ? (
                 <p className="px-5 py-4 text-sm text-gray-400">No products in this category.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-gray-400 border-b border-gray-100">
-                      <th className="text-left px-5 py-2 font-medium">Product Name</th>
-                      <th className="text-right px-5 py-2 font-medium">Price/Kit</th>
-                      <th className="text-right px-5 py-2 font-medium">Price/Vial</th>
-                      <th className="text-right px-5 py-2 font-medium">Vials/Kit</th>
-                      <th className="text-right px-5 py-2 font-medium">Handling</th>
-                      <th className="text-center px-5 py-2 font-medium">Active</th>
-                      <th className="px-5 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((product) => (
-                      <tr
-                        key={product.id}
-                        className={`border-b border-gray-50 ${!product.active ? "opacity-50" : ""}`}
-                      >
-                        <td className="px-5 py-3 font-medium text-gray-800">{product.productName}</td>
-                        <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.pricePerKit)}</td>
-                        <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.pricePerVial)}</td>
-                        <td className="px-5 py-3 text-right text-gray-600">{product.vialsPerKit}</td>
-                        <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.handlingFee)}</td>
-                        <td className="px-5 py-3 text-center">
-                          <button
-                            onClick={() => handleToggleActive(product)}
-                            className={`w-10 h-5 rounded-full transition-colors relative ${
-                              product.active ? "bg-green-400" : "bg-gray-200"
-                            }`}
-                          >
-                            <span
-                              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                                product.active ? "translate-x-5" : "translate-x-0.5"
-                              }`}
-                            />
-                          </button>
-                        </td>
-                        <td className="px-5 py-3 text-right">
-                          <button
-                            onClick={() => openEdit(product)}
-                            className="text-blue-600 text-xs font-medium hover:underline mr-3"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirm(product)}
-                            className="text-red-500 text-xs font-medium hover:underline"
-                          >
-                            Delete
-                          </button>
-                        </td>
+              ) : (() => {
+                // Group by useCase
+                const groups = new Map<string, Product[]>();
+                for (const p of items) {
+                  const uc = p.useCase || "";
+                  if (!groups.has(uc)) groups.set(uc, []);
+                  groups.get(uc)!.push(p);
+                }
+                const hasUseCases = groups.size > 1 || !groups.has("");
+                return (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-gray-400 border-b border-gray-100">
+                        <th className="text-left px-5 py-2 font-medium">Product Name</th>
+                        <th className="text-left px-5 py-2 font-medium">Function</th>
+                        <th className="text-right px-5 py-2 font-medium">Price/Kit</th>
+                        <th className="text-right px-5 py-2 font-medium">Price/Vial</th>
+                        <th className="text-right px-5 py-2 font-medium">Vials/Kit</th>
+                        <th className="text-right px-5 py-2 font-medium">Handling</th>
+                        <th className="text-center px-5 py-2 font-medium">Active</th>
+                        <th className="px-5 py-2" />
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody>
+                      {[...groups.entries()].map(([uc, groupItems]) => (
+                        <>
+                          {hasUseCases && uc && (
+                            <tr key={`uc-${uc}`} className="bg-gray-50 border-b border-gray-100">
+                              <td colSpan={8} className="px-5 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                {uc}
+                              </td>
+                            </tr>
+                          )}
+                          {groupItems.map((product) => (
+                            <tr
+                              key={product.id}
+                              className={`border-b border-gray-50 ${!product.active ? "opacity-50" : ""}`}
+                            >
+                              <td className="px-5 py-3 font-medium text-gray-800">{product.productName}</td>
+                              <td className="px-5 py-3 text-gray-500 text-xs max-w-xs">{product.productFunction || <span className="text-gray-300">—</span>}</td>
+                              <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.pricePerKit)}</td>
+                              <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.pricePerVial)}</td>
+                              <td className="px-5 py-3 text-right text-gray-600">{product.vialsPerKit}</td>
+                              <td className="px-5 py-3 text-right text-gray-600">₱{formatPrice(product.handlingFee)}</td>
+                              <td className="px-5 py-3 text-center">
+                                <button
+                                  onClick={() => handleToggleActive(product)}
+                                  className={`w-10 h-5 rounded-full transition-colors relative ${
+                                    product.active ? "bg-green-400" : "bg-gray-200"
+                                  }`}
+                                >
+                                  <span
+                                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                      product.active ? "translate-x-5" : "translate-x-0.5"
+                                    }`}
+                                  />
+                                </button>
+                              </td>
+                              <td className="px-5 py-3 text-right">
+                                <button
+                                  onClick={() => openEdit(product)}
+                                  className="text-blue-600 text-xs font-medium hover:underline mr-3"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirm(product)}
+                                  className="text-red-500 text-xs font-medium hover:underline"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -367,14 +396,37 @@ export default function ProductsPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Product Name</label>
+                  <input
+                    type="text"
+                    value={form.productName}
+                    onChange={(e) => setForm({ ...form, productName: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                    placeholder="e.g. Semaglutide 5mg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Use Case <span className="text-gray-300 font-normal">(subcategory)</span></label>
+                  <input
+                    type="text"
+                    value={form.useCase}
+                    onChange={(e) => setForm({ ...form, useCase: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                    placeholder="e.g. Skin Regeneration"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Product Name</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Function <span className="text-gray-300 font-normal">(product description)</span></label>
                 <input
                   type="text"
-                  value={form.productName}
-                  onChange={(e) => setForm({ ...form, productName: e.target.value })}
+                  value={form.productFunction}
+                  onChange={(e) => setForm({ ...form, productFunction: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
-                  placeholder="e.g. Semaglutide 5mg"
+                  placeholder="e.g. Stimulates collagen synthesis for skin repair"
                 />
               </div>
 

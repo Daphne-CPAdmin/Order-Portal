@@ -1,9 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getConsolidationData } from "@/lib/sheets";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
   try {
-    const data = await getConsolidationData();
+    const batchId = req.nextUrl.searchParams.get("batch") ?? undefined;
+    const data = await getConsolidationData(batchId);
     return NextResponse.json(data);
   } catch (error) {
     console.error("GET /api/consolidation error:", error);

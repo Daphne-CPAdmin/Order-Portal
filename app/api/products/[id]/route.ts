@@ -19,6 +19,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
       vialsPerKit: parseInt(body.vialsPerKit) || 1,
       handlingFee: parseFloat(body.handlingFee) || 100,
       active: body.active !== false,
+      useCase: body.useCase || "",
+      productFunction: body.productFunction || "",
     });
 
     return NextResponse.json({ success: true });

@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrders, createOrder, getOrderItems } from "@/lib/sheets";
+import { getOrders, createOrder, getOrderItems, getActiveBatch, findOrdersByTelegramInBatch, deleteOrder } from "@/lib/sheets";
 import { sendTelegram, buildNewOrderMessage } from "@/lib/telegram";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
   try {
+    const batchId = req.nextUrl.searchParams.get("batch") ?? undefined;
     const [orders, allItems] = await Promise.all([
-      getOrders(),
-      getOrderItems(),
+      getOrders(batchId),
+      getOrderItems(undefined, batchId),
     ]);
 
     const ordersWithItems = orders.map((order) => {
       const items = allItems.filter((i) => i.orderId === order.id);
       const categories = new Set(items.map((i) => i.category));
-      const subtotal = items.reduce(
-        (sum, i) => sum + i.qtyVials * i.pricePerVial,
-        0
-      );
+      const subtotal = items.reduce((sum, i) => sum + i.qtyVials * i.pricePerVial, 0);
       return {
         ...order,
         items,
@@ -35,7 +35,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { customerName, telegramUsername, items } = body;
+    const { customerName, telegramUsername, items, batchId, handlingByCat, grandTotal } = body;
 
     if (!customerName || !telegramUsername) {
       return NextResponse.json(
@@ -45,10 +45,46 @@ export async function POST(req: NextRequest) {
     }
 
     if (!items || items.length === 0) {
-      return NextResponse.json(
-        { error: "At least one item is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "At least one item is required" }, { status: 400 });
+    }
+
+    // handlingByCat must come from the frontend (already computed there)
+    const handlingMap: Record<string, number> = handlingByCat || {};
+    const total: number = grandTotal ?? 0;
+
+    // Determine effective batch for upsert check
+    let effectiveBatchId: string = batchId || "";
+    if (!effectiveBatchId) {
+      const activeBatch = await getActiveBatch();
+      effectiveBatchId = activeBatch?.id || "";
+    }
+
+    // Upsert: delete any existing order for this customer in this batch
+    let isUpdate = false;
+    if (effectiveBatchId) {
+      const existingIds = await findOrdersByTelegramInBatch(telegramUsername, effectiveBatchId);
+      if (existingIds.length > 0) {
+        // Block update if existing order is locked (payment pending or confirmed)
+        const existingOrders = await getOrders(effectiveBatchId);
+        const lockedOrder = existingOrders.find(
+          (o) => existingIds.includes(o.id) && o.status !== "pending"
+        );
+        if (lockedOrder) {
+          return NextResponse.json(
+            {
+              error:
+                lockedOrder.status === "waiting"
+                  ? "Your order is locked — payment is under review. Contact the haul admin to make changes."
+                  : "Your order cannot be updated at this stage. Please contact the haul admin.",
+            },
+            { status: 403 }
+          );
+        }
+        for (const id of existingIds) {
+          await deleteOrder(id);
+        }
+        isUpdate = true;
+      }
     }
 
     const orderId = await createOrder(
@@ -57,14 +93,17 @@ export async function POST(req: NextRequest) {
         telegramUsername,
         orderDate: new Date().toISOString(),
         status: "pending",
+        batchId: effectiveBatchId,
       },
-      items
+      items,
+      { handlingByCat: handlingMap, grandTotal: total }
     );
 
-    // Fire-and-forget Telegram notification
-    sendTelegram(buildNewOrderMessage(orderId, customerName, telegramUsername, items));
+    sendTelegram(
+      buildNewOrderMessage(orderId, customerName, telegramUsername, items, handlingMap, total, isUpdate)
+    );
 
-    return NextResponse.json({ orderId }, { status: 201 });
+    return NextResponse.json({ orderId, isUpdate }, { status: 201 });
   } catch (error) {
     console.error("POST /api/orders error:", error);
     return NextResponse.json({ error: "Failed to create order" }, { status: 500 });

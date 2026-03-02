@@ -14,7 +14,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { category, productName, pricePerKit, pricePerVial, vialsPerKit, handlingFee, active } = body;
+    const { category, productName, pricePerKit, pricePerVial, vialsPerKit, handlingFee, active, useCase, productFunction } = body;
 
     if (!category || !productName) {
       return NextResponse.json(
@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
       vialsPerKit: parseInt(vialsPerKit) || 1,
       handlingFee: parseFloat(handlingFee) || 100,
       active: active !== false,
+      useCase: useCase || "",
+      productFunction: productFunction || "",
     });
 
     return NextResponse.json({ success: true }, { status: 201 });

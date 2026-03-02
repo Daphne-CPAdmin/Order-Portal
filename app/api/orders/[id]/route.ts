@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrders, getOrderItems, updateOrder, deleteOrder } from "@/lib/sheets";
 import { sendTelegram, buildStatusMessage } from "@/lib/telegram";
 
+export const dynamic = "force-dynamic";
+
 type Params = { params: { id: string } };
 
 export async function GET(_req: NextRequest, { params }: Params) {
