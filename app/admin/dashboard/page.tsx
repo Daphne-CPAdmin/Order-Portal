@@ -608,12 +608,12 @@ export default function Dashboard() {
                           disabled={lockingCategory === category}
                           className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all border ${
                             categoryLocks[category]
-                              ? "bg-rose-100 text-rose-700 border-rose-200 hover:bg-rose-200"
-                              : "bg-white text-gray-500 border-gray-200 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200"
+                              ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                              : "bg-white text-gray-500 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
                           }`}
-                          title={categoryLocks[category] ? "Payment open — click to lock" : "Click to open payment for this category"}
+                          title={categoryLocks[category] ? "Click to close payment for this category" : "Click to open payment for this category"}
                         >
-                          {lockingCategory === category ? "…" : categoryLocks[category] ? "🔓 Payment Open" : "🔒 Lock Payment"}
+                          {lockingCategory === category ? "…" : categoryLocks[category] ? "🔒 Close Payment" : "🔓 Open for Payment"}
                         </button>
                       )}
                       <button
