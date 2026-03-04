@@ -1029,7 +1029,97 @@ export default function OrderForm() {
             </div>
           ) : (catMap.get(activeCategory) || []).length === 0 ? (
             <p className="text-center text-gray-400 py-20 text-sm">No products in this category.</p>
-          ) : (() => {
+          ) : activeCategory === "TOPICAL RAWS" ? (() => {
+            const catProducts = catMap.get(activeCategory) || [];
+            const useCaseGroups = new Map<string, typeof catProducts>();
+            for (const p of catProducts) {
+              const uc = p.useCase || "";
+              if (!useCaseGroups.has(uc)) useCaseGroups.set(uc, []);
+              useCaseGroups.get(uc)!.push(p);
+            }
+            const ucColorPalette = [
+              { header: "bg-purple-50 border-purple-200", hookText: "text-purple-700", badge: "bg-purple-100 text-purple-700", accentBorder: "border-l-purple-400" },
+              { header: "bg-rose-50 border-rose-200",     hookText: "text-rose-700",   badge: "bg-rose-100 text-rose-700",     accentBorder: "border-l-rose-400" },
+              { header: "bg-teal-50 border-teal-200",     hookText: "text-teal-700",   badge: "bg-teal-100 text-teal-700",     accentBorder: "border-l-teal-400" },
+              { header: "bg-amber-50 border-amber-200",   hookText: "text-amber-700",  badge: "bg-amber-100 text-amber-700",   accentBorder: "border-l-amber-400" },
+              { header: "bg-violet-50 border-violet-200", hookText: "text-violet-700", badge: "bg-violet-100 text-violet-700", accentBorder: "border-l-violet-400" },
+              { header: "bg-orange-50 border-orange-200", hookText: "text-orange-700", badge: "bg-orange-100 text-orange-700", accentBorder: "border-l-orange-400" },
+            ];
+            const ucEntries = [...useCaseGroups.entries()];
+            return (
+            <div className="space-y-4">
+              {ucEntries.map(([uc, groupProducts], ucIdx) => {
+                const colors = ucColorPalette[ucIdx % ucColorPalette.length];
+                return (
+                  <div key={uc || "__none__"} className={`rounded-xl border overflow-hidden ${colors.header}`}>
+                    {uc && (
+                      <div className={`flex items-center justify-between px-4 py-2.5 border-b ${colors.header}`}>
+                        <p className={`text-xs font-bold tracking-wide ${colors.hookText}`}>{uc}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors.badge}`}>
+                          {groupProducts.length} item{groupProducts.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-gray-100">
+                      {groupProducts.map((product) => {
+                        const qty = cart.get(product.productName) || 0;
+                        const max = maxQty(product);
+                        const lineTotal = qty * product.pricePerVial;
+                        const fnText = product.productFunction || "";
+                        const colonIdx = fnText.indexOf(" : ");
+                        const hook = colonIdx >= 0 ? fnText.slice(0, colonIdx) : fnText;
+                        const detail = colonIdx >= 0 ? fnText.slice(colonIdx + 3) : "";
+                        return (
+                          <div
+                            key={product.productName}
+                            className={`bg-white p-4 flex flex-col gap-2 border-l-2 transition-all ${
+                              qty > 0 ? colors.accentBorder : "border-l-transparent"
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-tight">
+                                {product.productName}
+                              </p>
+                              {hook && (
+                                <p className={`text-sm font-semibold leading-snug italic ${colors.hookText}`}>{hook}</p>
+                              )}
+                              {detail && (
+                                <p className="text-[11px] text-gray-500 leading-relaxed">{detail}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                              <span className="text-[11px] text-gray-400">
+                                ₱{formatPrice(product.pricePerVial)}<span className="text-gray-300">/g</span>
+                                {qty > 0 && (
+                                  <span className={`ml-1.5 font-semibold ${colors.hookText}`}>· ₱{formatPrice(lineTotal)}</span>
+                                )}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => setQty(product.productName, Math.max(0, qty - 1))}
+                                  disabled={qty === 0}
+                                  className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-25 flex items-center justify-center text-gray-600 text-sm font-bold transition-colors"
+                                >−</button>
+                                <span className="w-5 text-center text-sm font-semibold text-gray-800 tabular-nums">
+                                  {qty === 0 ? <span className="text-gray-300">0</span> : qty}
+                                </span>
+                                <button
+                                  onClick={() => setQty(product.productName, Math.min(max, qty + 1))}
+                                  disabled={qty >= max}
+                                  className="w-7 h-7 rounded-lg bg-rose-100 hover:bg-rose-200 disabled:opacity-25 flex items-center justify-center text-rose-600 text-sm font-bold transition-colors"
+                                >+</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            );
+          })() : (() => {
             const catProducts = catMap.get(activeCategory) || [];
             // Group by useCase while preserving insertion order
             const useCaseGroups = new Map<string, typeof catProducts>();
