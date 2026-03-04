@@ -164,6 +164,7 @@ export default function OrderForm() {
   const [paidCatKeys, setPaidCatKeys] = useState<Set<string>>(new Set());
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
+  const [batchTotals, setBatchTotals] = useState<Map<string, number>>(new Map());
   const [autoLoadedNote, setAutoLoadedNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -193,10 +194,13 @@ export default function OrderForm() {
       .then((r) => r.json())
       .then((data) => {
         const m = new Map<string, SlotInfo>();
+        const catTotals = new Map<string, number>();
         for (const row of data.rows || []) {
           m.set(row.productName, { totalVials: row.totalVials, openSlots: row.openSlots });
+          catTotals.set(row.category, (catTotals.get(row.category) || 0) + (row.category === "SERUMS" ? row.kitsNeeded : row.totalVials));
         }
         setSlotMap(m);
+        setBatchTotals(catTotals);
       })
       .catch(() => {});
   }, []);
@@ -977,6 +981,32 @@ export default function OrderForm() {
               );
             })}
           </nav>
+          {/* Batch MOQ progress */}
+          {batchTotals.size > 0 && (
+            <div className="px-3 py-3 border-t border-gray-100 space-y-2.5">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-1">Batch Progress</p>
+              {CATEGORIES.map((cat) => {
+                const moq = MOQ[cat];
+                if (!moq) return null;
+                const total = batchTotals.get(cat) || 0;
+                const pct = Math.min(100, Math.round((total / moq.qty) * 100));
+                const met = total >= moq.qty;
+                return (
+                  <div key={cat} className="px-1 space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-500 font-medium">{CATEGORY_META[cat].emoji} {cat}</span>
+                      <span className={`text-[10px] font-bold tabular-nums ${met ? "text-emerald-500" : pct >= 75 ? "text-amber-500" : "text-gray-400"}`}>
+                        {total}/{moq.qty} {moq.unit}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${met ? "bg-emerald-400" : pct >= 75 ? "bg-amber-400" : "bg-purple-200"}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {/* Category notices in sidebar */}
           {(cosmeticsNotice || pensNotice || uspBacNotice || topicalRawsNotice) && (
             <div className="px-3 pb-4 space-y-2">
