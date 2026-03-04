@@ -11,7 +11,7 @@ const MOQ: Partial<Record<Category, { qty: number; unit: string }>> = {
   COSMETICS:      { qty: 20,  unit: "boxes" },
   SERUMS:         { qty: 10,  unit: "kits" },
   PENS:           { qty: 10,  unit: "pens" },
-  "TOPICAL RAWS": { qty: 20,  unit: "g total" },
+  "TOPICAL RAWS": { qty: 40,  unit: "g total" },
 };
 
 const CATEGORY_META: Record<Category, { emoji: string; description: string }> = {
@@ -847,9 +847,9 @@ export default function OrderForm() {
       ) : (
         <>
           <strong>₱{formatPrice(topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g))} handling</strong> for {totalTopicalRaws}g ordered
-          <br /><span className={totalTopicalRaws < 20 ? "text-amber-500 font-semibold" : "text-teal-400"}>
-            {totalTopicalRaws < 20
-              ? `MOQ: ${20 - totalTopicalRaws}g more needed across all items`
+          <br /><span className={totalTopicalRaws < 40 ? "text-amber-500 font-semibold" : "text-teal-400"}>
+            {totalTopicalRaws < 40
+              ? `MOQ: ${40 - totalTopicalRaws}g more needed across all items`
               : topicalRawsVarieties10g > 0
                 ? `${topicalRawsVarieties10g} variet${topicalRawsVarieties10g === 1 ? "y" : "ies"} at 10g · +₱50 each`
                 : `+₱50 per variety at 10g`}
