@@ -1066,9 +1066,11 @@ export default function OrderForm() {
                         const max = maxQty(product);
                         const lineTotal = qty * product.pricePerVial;
                         const fnText = product.productFunction || "";
-                        const colonIdx = fnText.indexOf(" : ");
-                        const hook = colonIdx >= 0 ? fnText.slice(0, colonIdx) : fnText;
-                        const detail = colonIdx >= 0 ? fnText.slice(colonIdx + 3) : "";
+                        let hook = fnText, detail = "";
+                        const s1 = fnText.indexOf(" : "), s2 = fnText.indexOf(": "), s3 = fnText.indexOf(" - ");
+                        if (s1 >= 0) { hook = fnText.slice(0, s1).trim(); detail = fnText.slice(s1 + 3).trim(); }
+                        else if (s2 >= 0) { hook = fnText.slice(0, s2).trim(); detail = fnText.slice(s2 + 2).trim(); }
+                        else if (s3 >= 0) { hook = fnText.slice(0, s3).trim(); detail = fnText.slice(s3 + 3).trim(); }
                         return (
                           <div
                             key={product.productName}
