@@ -151,7 +151,7 @@ const BATCH_HEADER = [
 
 function pensHandlingFee(n: number): number {
   if (n === 0) return 0;
-  return 100 + Math.floor((n - 1) / 5) * 50;
+  return 150 + Math.floor((n - 1) / 5) * 50;
 }
 
 function uspBacHandlingFee(n: number): number {

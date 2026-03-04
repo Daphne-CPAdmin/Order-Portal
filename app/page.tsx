@@ -46,7 +46,7 @@ type LookupOrder = {
 function pensHandlingFee(n: number) {
   if (n === 0) return 0;
   // ₱100 for 1–5 pens; +₱50 per every 5 pens after that
-  return 100 + Math.floor((n - 1) / 5) * 50;
+  return 150 + Math.floor((n - 1) / 5) * 50;
 }
 
 function uspBacHandlingFee(n: number) {
@@ -808,7 +808,7 @@ export default function OrderForm() {
         : "bg-blue-50 text-blue-700 border border-blue-100"
     }`}>
       {totalPens === 0 ? (
-        <>Ordering <strong>more than 5 pens</strong> adds <strong>+₱50 handling</strong> per 5 pens thereafter</>
+        <>Handling: <strong>₱150 for 1–5 pens</strong> · <strong>+₱50 per 5 pens</strong> thereafter</>
       ) : totalPens <= 5 ? (
         <>
           <strong>₱{formatPrice(pensHandlingFee(totalPens))} handling</strong> for {totalPens} pen{totalPens !== 1 ? "s" : ""}
