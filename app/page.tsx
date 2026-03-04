@@ -8,9 +8,9 @@ type Category = (typeof CATEGORIES)[number];
 
 const MOQ: Partial<Record<Category, { qty: number; unit: string }>> = {
   "USP BAC":      { qty: 100, unit: "ampoules" },
-  COSMETICS:      { qty: 20,  unit: "boxes" },
+  COSMETICS:      { qty: 30,  unit: "boxes" },
   SERUMS:         { qty: 10,  unit: "kits" },
-  PENS:           { qty: 10,  unit: "pens" },
+  PENS:           { qty: 30,  unit: "pens" },
   "TOPICAL RAWS": { qty: 50,  unit: "g total" },
 };
 
@@ -854,6 +854,10 @@ export default function OrderForm() {
                 ? `${topicalRawsVarieties10g} variet${topicalRawsVarieties10g === 1 ? "y" : "ies"} at 10g · +₱50 each`
                 : `+₱50 per variety at 10g`}
           </span>
+          <div className="mt-1.5 w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${totalTopicalRaws >= 50 ? "bg-emerald-400" : "bg-teal-400"}`} style={{ width: `${Math.min(100, Math.round((totalTopicalRaws / 50) * 100))}%` }} />
+          </div>
+          <p className="text-[10px] mt-0.5 tabular-nums">{totalTopicalRaws}/50g · {Math.min(100, Math.round((totalTopicalRaws / 50) * 100))}%</p>
         </>
       )}
     </div>

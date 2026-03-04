@@ -7,6 +7,14 @@ function formatPrice(n: number) {
   return n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
+const CATEGORY_MOQ: Record<string, { qty: number; unit: string }> = {
+  "USP BAC":      { qty: 100, unit: "ampoules" },
+  COSMETICS:      { qty: 30,  unit: "boxes" },
+  SERUMS:         { qty: 10,  unit: "kits" },
+  PENS:           { qty: 30,  unit: "pens" },
+  "TOPICAL RAWS": { qty: 50,  unit: "g" },
+};
+
 const CATEGORY_EMOJI: Record<string, string> = {
   "USP BAC": "💉",
   COSMETICS: "✨",
@@ -638,6 +646,29 @@ export default function Dashboard() {
                       </button>
                     </div>
                   </div>
+                  {/* MOQ progress bar */}
+                  {(() => {
+                    const moq = CATEGORY_MOQ[category];
+                    if (!moq) return null;
+                    const total = category === "SERUMS"
+                      ? rows.reduce((s, r) => s + r.kitsNeeded, 0)
+                      : rows.reduce((s, r) => s + r.totalVials, 0);
+                    const pct = Math.min(100, Math.round((total / moq.qty) * 100));
+                    const met = total >= moq.qty;
+                    return (
+                      <div className={`px-5 py-2.5 border-b ${met ? "bg-emerald-50 border-emerald-100" : "bg-white border-gray-100"}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[11px] font-semibold ${met ? "text-emerald-600" : "text-gray-500"}`}>
+                            {met ? "✓ MOQ met" : "MOQ progress"}: {total} / {moq.qty} {moq.unit}
+                          </span>
+                          <span className={`text-[10px] font-bold tabular-nums ${met ? "text-emerald-500" : pct >= 75 ? "text-amber-500" : "text-gray-400"}`}>{pct}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${met ? "bg-emerald-400" : pct >= 75 ? "bg-amber-400" : "bg-blue-300"}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-xs text-gray-400 border-b border-gray-100">
