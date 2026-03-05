@@ -31,8 +31,11 @@ export async function GET(req: NextRequest) {
           pricePerVial: i.pricePerVial,
           vialsPerKit: i.vialsPerKit,
           categoryStatus: i.categoryStatus || "pending",
+          handlingFee: i.handlingFee || 0,
         }));
       const subtotal = items.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
+      const handlingTotal = [...new Map(items.map((i) => [i.category, i.handlingFee])).values()]
+        .reduce((s, v) => s + v, 0);
       return {
         id: order.id,
         customerName: order.customerName,
@@ -42,6 +45,7 @@ export async function GET(req: NextRequest) {
         batchId: order.batchId,
         items,
         subtotal,
+        grandTotal: subtotal + handlingTotal,
       };
     });
 

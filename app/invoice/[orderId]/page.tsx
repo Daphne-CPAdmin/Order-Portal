@@ -36,6 +36,8 @@ interface InvoiceData {
     items: { productName: string; qtyVials: number; pricePerVial: number; lineTotal: number }[];
     handling: number;
     subtotal: number;
+    categoryStatus: string;
+    paymentOpen: boolean;
   }[];
   subtotal: number;
   handlingTotal: number;
@@ -48,16 +50,20 @@ export default function InvoicePage() {
   const [invoice, setInvoice] = useState<InvoiceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [paying, setPaying] = useState(false);
-  const [notified, setNotified] = useState(false);
+  const [payingCategory, setPayingCategory] = useState<string | null>(null);
+  const [paidCategories, setPaidCategories] = useState<Set<string>>(new Set());
 
-  async function handleNotifyAdmin() {
-    setPaying(true);
+  async function handleNotifyAdmin(category: string) {
+    setPayingCategory(category);
     try {
-      const res = await fetch(`/api/orders/${orderId}/pay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      if (res.ok) setNotified(true);
+      const res = await fetch(`/api/orders/${orderId}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category }),
+      });
+      if (res.ok) setPaidCategories((prev) => new Set([...prev, category]));
     } finally {
-      setPaying(false);
+      setPayingCategory(null);
     }
   }
 
@@ -167,7 +173,18 @@ export default function InvoicePage() {
             <div key={group.category}>
               <div className="flex items-center gap-1.5 mb-2">
                 <span className="text-sm">{CATEGORY_EMOJI[group.category] || "📦"}</span>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{group.category}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex-1">{group.category}</p>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${
+                  (group.categoryStatus === "paid" || paidCategories.has(group.category))
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : (group.categoryStatus === "waiting")
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-gray-100 text-gray-400 border-gray-200"
+                }`}>
+                  {(group.categoryStatus === "paid" || paidCategories.has(group.category)) ? "paid ✓"
+                    : group.categoryStatus === "waiting" ? "⏳ waiting"
+                    : "pending"}
+                </span>
               </div>
               <div className="space-y-1.5">
                 {group.items.map((item) => (
@@ -196,53 +213,90 @@ export default function InvoicePage() {
           ))}
 
           {/* Totals */}
-          <div className="border-t-2 border-gray-200 pt-4 space-y-1.5">
-            <div className="flex justify-between text-sm text-gray-500">
-              <span>Products subtotal</span>
-              <span>₱{formatPrice(invoice.subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-sm text-gray-500">
-              <span>Total handling</span>
-              <span>₱{formatPrice(invoice.handlingTotal)}</span>
-            </div>
-            <div className="flex justify-between text-lg font-extrabold text-gray-900 pt-2 border-t border-gray-100">
-              <span>Grand Total</span>
-              <span className="text-purple-700">₱{formatPrice(invoice.grandTotal)}</span>
-            </div>
-          </div>
+          {(() => {
+            const paidTotal = invoice.categoryGroups
+              .filter((g) => g.categoryStatus === "paid" || paidCategories.has(g.category))
+              .reduce((s, g) => s + g.subtotal + g.handling, 0);
+            const balanceDue = invoice.grandTotal - paidTotal;
+            return (
+              <div className="border-t-2 border-gray-200 pt-4 space-y-1.5">
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>Products subtotal</span>
+                  <span>₱{formatPrice(invoice.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>Total handling</span>
+                  <span>₱{formatPrice(invoice.handlingTotal)}</span>
+                </div>
+                <div className="flex justify-between text-lg font-extrabold text-gray-900 pt-2 border-t border-gray-100">
+                  <span>Grand Total</span>
+                  <span className="text-purple-700">₱{formatPrice(invoice.grandTotal)}</span>
+                </div>
+                {paidTotal > 0 && (
+                  <div className="flex justify-between text-sm text-emerald-600">
+                    <span>Paid ✅</span>
+                    <span>₱{formatPrice(paidTotal)}</span>
+                  </div>
+                )}
+                {balanceDue > 0 && (
+                  <div className="flex justify-between text-sm font-bold text-gray-800">
+                    <span>Balance Due</span>
+                    <span className="text-red-600">₱{formatPrice(balanceDue)}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
-          {/* Payment info / status block */}
-          {invoice.status === "paid" && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-center">
-              <p className="text-emerald-700 font-bold text-sm">✓ Payment Confirmed</p>
-              <p className="text-emerald-500 text-xs mt-1">Your order is confirmed and being processed.</p>
-            </div>
-          )}
+          {/* Fulfilled / dispatched notice */}
           {invoice.status === "fulfilled" && (
             <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-center">
               <p className="text-purple-700 font-bold text-sm">📦 Order Dispatched</p>
               <p className="text-purple-500 text-xs mt-1">Your order has been dispatched. Thank you!</p>
             </div>
           )}
-          {invoice.status === "pending" && !notified && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-3 print:hidden">
-              <div>
-                <p className="text-amber-800 font-bold text-xs mb-1">💳 Send payment via GCash · GoTyme · Maya</p>
-                <p className="font-extrabold text-amber-900 text-base tracking-wide">09267007491</p>
-              </div>
-              <button
-                onClick={handleNotifyAdmin}
-                disabled={paying}
-                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
-              >
-                {paying ? "Notifying admin…" : "✉️ I've sent payment — notify admin"}
-              </button>
-            </div>
-          )}
-          {(invoice.status === "waiting" || notified) && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-center print:hidden">
-              <p className="text-blue-700 font-bold text-sm">⏳ Payment Under Review</p>
-              <p className="text-blue-500 text-xs mt-1">Waiting for haul admin to confirm your payment. We&apos;ll reach out on Telegram.</p>
+
+          {/* Per-category payment blocks */}
+          {invoice.status !== "fulfilled" && invoice.status !== "cancelled" && (
+            <div className="space-y-2 print:hidden">
+              {invoice.categoryGroups.map((group) => {
+                const isPaid = group.categoryStatus === "paid" || paidCategories.has(group.category);
+                const isWaiting = group.categoryStatus === "waiting" && !paidCategories.has(group.category);
+                const canPay = group.categoryStatus === "pending" && group.paymentOpen && !paidCategories.has(group.category);
+                if (isPaid) {
+                  return (
+                    <div key={group.category} className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2 text-center">
+                      <p className="text-emerald-600 text-sm font-semibold">✅ {group.category} paid</p>
+                    </div>
+                  );
+                }
+                if (isWaiting) {
+                  return (
+                    <div key={group.category} className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-center">
+                      <p className="text-blue-600 text-sm">⏳ Waiting confirmation for {group.category}</p>
+                    </div>
+                  );
+                }
+                if (canPay) {
+                  return (
+                    <div key={group.category} className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-3">
+                      <div>
+                        <p className="text-amber-800 font-bold text-xs mb-1">💳 Pay {group.category} via GCash · GoTyme · Maya</p>
+                        <p className="font-extrabold text-amber-900 text-base tracking-wide">09267007491</p>
+                        <p className="text-xs text-amber-700 mt-1">Amount: ₱{formatPrice(group.subtotal + group.handling)}</p>
+                      </div>
+                      <button
+                        onClick={() => handleNotifyAdmin(group.category)}
+                        disabled={payingCategory === group.category}
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+                      >
+                        {payingCategory === group.category ? "Notifying admin…" : `✉️ I've sent payment for ${group.category}`}
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })}
             </div>
           )}
         </div>

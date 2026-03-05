@@ -39,8 +39,9 @@ type LookupOrder = {
   telegramUsername: string;
   orderDate: string;
   status: string;
-  items: { productName: string; category: string; qtyVials: number; pricePerVial: number; vialsPerKit: number; categoryStatus?: string }[];
+  items: { productName: string; category: string; qtyVials: number; pricePerVial: number; vialsPerKit: number; categoryStatus?: string; handlingFee?: number }[];
   subtotal: number;
+  grandTotal?: number;
 };
 
 function pensHandlingFee(n: number) {
@@ -48,6 +49,35 @@ function pensHandlingFee(n: number) {
   // ₱100 for 1–5 pens; +₱50 per every 5 pens after that
   return 150 + Math.floor((n - 1) / 5) * 50;
 }
+
+const PEN_IMAGE_KEYS = new Set(["black","brown","coral","dark-blue","deep-purple","gold","pink","purple","red","silver","tiffany-blue"]);
+
+function penColorKey(productName: string): string {
+  return productName.trim().toLowerCase()
+    .replace(/\s+v\d+\s+pen\b.*/, "")
+    .replace(/\s+pen\b.*/, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+function penImagePath(productName: string): string | null {
+  const key = penColorKey(productName);
+  return PEN_IMAGE_KEYS.has(key) ? `/pens/${key}.jpg` : null;
+}
+
+const PEN_ACCENT: Record<string, { solid: string; light: string }> = {
+  "black":        { solid: "#1c1c1e", light: "#ececec" },
+  "brown":        { solid: "#6F4E37", light: "#f5ece6" },
+  "coral":        { solid: "#E8735A", light: "#fdf0ed" },
+  "dark-blue":    { solid: "#1B3A6B", light: "#eef2f9" },
+  "deep-purple":  { solid: "#4A1C6B", light: "#f3edf9" },
+  "gold":         { solid: "#A07820", light: "#fdf8e8" },
+  "pink":         { solid: "#D4558A", light: "#fdf0f5" },
+  "purple":       { solid: "#7B3FA0", light: "#f5eef9" },
+  "red":          { solid: "#C0392B", light: "#fcecea" },
+  "silver":       { solid: "#7a7a7a", light: "#f5f5f5" },
+  "tiffany-blue": { solid: "#0ABAB5", light: "#e8f9f9" },
+};
 
 function uspBacHandlingFee(n: number) {
   if (n === 0) return 0;
@@ -428,6 +458,17 @@ export default function OrderForm() {
                         if (!itemsByCat.has(item.category)) itemsByCat.set(item.category, []);
                         itemsByCat.get(item.category)!.push(item);
                       }
+                      // Compute per-category totals for balance summary
+                      const catData = [...itemsByCat.entries()].map(([cat, catItems]) => {
+                        const sub = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
+                        const handling = catItems[0]?.handlingFee || 0;
+                        const status = catItems[0]?.categoryStatus || "pending";
+                        return { cat, sub, handling, status, catKey: `${order.id}:${cat}` };
+                      });
+                      const grandTotal = order.grandTotal ?? catData.reduce((s, v) => s + v.sub + v.handling, 0);
+                      const paidTotal = catData.filter(v => v.status === "paid").reduce((s, v) => s + v.sub + v.handling, 0);
+                      const waitingTotal = catData.filter(v => v.status === "waiting" || paidCatKeys.has(v.catKey)).reduce((s, v) => s + v.sub + v.handling, 0);
+                      const balanceDue = grandTotal - paidTotal - waitingTotal;
                       return (
                         <div key={order.id} className="bg-white border border-gray-100 rounded-xl p-3 text-xs shadow-sm">
                           <div className="flex items-center justify-between mb-1">
@@ -450,6 +491,8 @@ export default function OrderForm() {
                               const catKey = `${order.id}:${cat}`;
                               const catLocked = categoryLocks[cat];
                               const catSubtotal = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
+                              const catHandling = catItems[0]?.handlingFee || 0;
+                              const catTotal = catSubtotal + catHandling;
                               return (
                                 <div key={cat} className="bg-gray-50 rounded-lg px-2.5 py-2 border border-gray-100">
                                   <div className="flex items-center justify-between mb-1">
@@ -466,8 +509,11 @@ export default function OrderForm() {
                                       <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
                                     </div>
                                   ))}
-                                  <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100 text-[10px]">
-                                    <span>Subtotal</span><span>₱{formatPrice(catSubtotal)}</span>
+                                  <div className="flex justify-between text-gray-400 mt-1 pt-1 border-t border-gray-100 text-[10px]">
+                                    <span>Handling fee</span><span>₱{formatPrice(catHandling)}</span>
+                                  </div>
+                                  <div className="flex justify-between font-semibold text-gray-700 mt-0.5 text-[10px]">
+                                    <span>Category total</span><span>₱{formatPrice(catTotal)}</span>
                                   </div>
                                   {order.status !== "cancelled" && order.status !== "fulfilled" && (
                                     catStatus === "paid" ? (
@@ -496,8 +542,25 @@ export default function OrderForm() {
                               );
                             })}
                           </div>
-                          <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-100 pt-2 mb-2">
-                            <span>Subtotal</span><span>₱{formatPrice(order.subtotal)}</span>
+                          <div className="border-t border-gray-100 pt-2 mb-2 space-y-0.5 text-[10px]">
+                            <div className="flex justify-between font-bold text-gray-800">
+                              <span>Grand Total</span><span>₱{formatPrice(grandTotal)}</span>
+                            </div>
+                            {paidTotal > 0 && (
+                              <div className="flex justify-between text-emerald-600">
+                                <span>Paid ✅</span><span>₱{formatPrice(paidTotal)}</span>
+                              </div>
+                            )}
+                            {waitingTotal > 0 && (
+                              <div className="flex justify-between text-blue-600">
+                                <span>Waiting ⏳</span><span>₱{formatPrice(waitingTotal)}</span>
+                              </div>
+                            )}
+                            {balanceDue > 0 && (
+                              <div className="flex justify-between font-semibold text-red-600">
+                                <span>Balance Due 🔴</span><span>₱{formatPrice(balanceDue)}</span>
+                              </div>
+                            )}
                           </div>
                           <a
                             href={`/invoice/${order.id}`}
@@ -695,6 +758,17 @@ export default function OrderForm() {
                         if (!itemsByCat.has(item.category)) itemsByCat.set(item.category, []);
                         itemsByCat.get(item.category)!.push(item);
                       }
+                      // Compute per-category totals for balance summary
+                      const catData = [...itemsByCat.entries()].map(([cat, catItems]) => {
+                        const sub = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
+                        const handling = catItems[0]?.handlingFee || 0;
+                        const status = catItems[0]?.categoryStatus || "pending";
+                        return { cat, sub, handling, status, catKey: `${order.id}:${cat}` };
+                      });
+                      const grandTotal = order.grandTotal ?? catData.reduce((s, v) => s + v.sub + v.handling, 0);
+                      const paidTotal = catData.filter(v => v.status === "paid").reduce((s, v) => s + v.sub + v.handling, 0);
+                      const waitingTotal = catData.filter(v => v.status === "waiting" || paidCatKeys.has(v.catKey)).reduce((s, v) => s + v.sub + v.handling, 0);
+                      const balanceDue = grandTotal - paidTotal - waitingTotal;
                       return (
                         <div key={order.id} className="bg-gray-50 rounded-xl p-3 text-xs">
                           <div className="flex items-center justify-between mb-1">
@@ -717,6 +791,8 @@ export default function OrderForm() {
                               const catKey = `${order.id}:${cat}`;
                               const catLocked = categoryLocks[cat];
                               const catSubtotal = catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);
+                              const catHandling = catItems[0]?.handlingFee || 0;
+                              const catTotal = catSubtotal + catHandling;
                               return (
                                 <div key={cat} className="bg-white rounded-lg px-2.5 py-2 border border-gray-100">
                                   <div className="flex items-center justify-between mb-1">
@@ -733,8 +809,11 @@ export default function OrderForm() {
                                       <span className="shrink-0">₱{formatPrice(item.qtyVials * item.pricePerVial)}</span>
                                     </div>
                                   ))}
-                                  <div className="flex justify-between font-semibold text-gray-700 mt-1 pt-1 border-t border-gray-100 text-[10px]">
-                                    <span>Subtotal</span><span>₱{formatPrice(catSubtotal)}</span>
+                                  <div className="flex justify-between text-gray-400 mt-1 pt-1 border-t border-gray-100 text-[10px]">
+                                    <span>Handling fee</span><span>₱{formatPrice(catHandling)}</span>
+                                  </div>
+                                  <div className="flex justify-between font-semibold text-gray-700 mt-0.5 text-[10px]">
+                                    <span>Category total</span><span>₱{formatPrice(catTotal)}</span>
                                   </div>
                                   {order.status !== "cancelled" && order.status !== "fulfilled" && (
                                     catStatus === "paid" ? (
@@ -763,8 +842,25 @@ export default function OrderForm() {
                               );
                             })}
                           </div>
-                          <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-2 mb-2">
-                            <span>Subtotal</span><span>₱{formatPrice(order.subtotal)}</span>
+                          <div className="border-t border-gray-200 pt-2 mb-2 space-y-0.5 text-[10px]">
+                            <div className="flex justify-between font-bold text-gray-800">
+                              <span>Grand Total</span><span>₱{formatPrice(grandTotal)}</span>
+                            </div>
+                            {paidTotal > 0 && (
+                              <div className="flex justify-between text-emerald-600">
+                                <span>Paid ✅</span><span>₱{formatPrice(paidTotal)}</span>
+                              </div>
+                            )}
+                            {waitingTotal > 0 && (
+                              <div className="flex justify-between text-blue-600">
+                                <span>Waiting ⏳</span><span>₱{formatPrice(waitingTotal)}</span>
+                              </div>
+                            )}
+                            {balanceDue > 0 && (
+                              <div className="flex justify-between font-semibold text-red-600">
+                                <span>Balance Due 🔴</span><span>₱{formatPrice(balanceDue)}</span>
+                              </div>
+                            )}
                           </div>
                           <a
                             href={`/invoice/${order.id}`}
@@ -1155,6 +1251,66 @@ export default function OrderForm() {
               })}
             </div>
             );
+          })() : activeCategory === "PENS" ? (() => {
+            const catProducts = catMap.get("PENS") || [];
+            return (
+              <div className="grid grid-cols-4 gap-2">
+                {catProducts.map((product) => {
+                  const qty = cart.get(product.productName) || 0;
+                  const max = maxQty(product);
+                  const penImg = penImagePath(product.productName);
+                  const ck = penColorKey(product.productName);
+                  const accent = PEN_ACCENT[ck] || { solid: "#6b7280", light: "#f3f4f6" };
+                  const lineTotal = qty * product.pricePerVial;
+                  return (
+                    <div
+                      key={product.productName}
+                      className={`rounded-xl overflow-hidden flex flex-col border-2 transition-all ${qty > 0 ? "shadow-lg scale-[1.02]" : "border-transparent shadow-sm"}`}
+                      style={qty > 0 ? { borderColor: accent.solid } : undefined}
+                    >
+                      {/* Image area — square crop */}
+                      <div className="aspect-square relative flex items-center justify-center" style={{ backgroundColor: accent.light }}>
+                        {penImg ? (
+                          <img src={penImg} alt={product.productName} className="w-full h-full object-contain p-2" />
+                        ) : (
+                          <span className="text-3xl">🖊️</span>
+                        )}
+                        {qty > 0 && (
+                          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow" style={{ backgroundColor: accent.solid }}>
+                            {qty}
+                          </div>
+                        )}
+                      </div>
+                      {/* Color strip */}
+                      <div className="px-2 py-1.5 flex flex-col gap-1" style={{ backgroundColor: accent.solid }}>
+                        <p className="text-[10px] font-bold text-white leading-tight truncate">{product.productName}</p>
+                        <p className="text-[9px] text-white/70 leading-none">
+                          ₱{formatPrice(product.pricePerVial)}
+                          {qty > 0 && <span className="font-semibold text-white"> · ₱{formatPrice(lineTotal)}</span>}
+                        </p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <button
+                            onClick={() => setQty(product.productName, Math.max(0, qty - 1))}
+                            disabled={qty === 0}
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold text-white transition-opacity disabled:opacity-30"
+                            style={{ backgroundColor: "rgba(0,0,0,0.25)" }}
+                          >−</button>
+                          <span className="flex-1 text-center text-xs font-bold text-white tabular-nums">
+                            {qty === 0 ? <span className="opacity-40">0</span> : qty}
+                          </span>
+                          <button
+                            onClick={() => setQty(product.productName, Math.min(max, qty + 1))}
+                            disabled={qty >= max}
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold text-white transition-opacity disabled:opacity-30"
+                            style={{ backgroundColor: "rgba(0,0,0,0.25)" }}
+                          >+</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
           })() : (() => {
             const catProducts = catMap.get(activeCategory) || [];
             // Group by useCase while preserving insertion order
@@ -1179,6 +1335,7 @@ export default function OrderForm() {
                 const useToggle = product.vialsPerKit === 1 && product.category !== "COSMETICS" && product.category !== "PENS" && product.category !== "USP BAC" && product.category !== "TOPICAL RAWS";
                 const showKit = product.vialsPerKit > 1 && (product.category === "SERUMS" || product.category === "USP BAC");
                 const lineTotal = qty * product.pricePerVial;
+                const penImg = penImagePath(product.productName);
 
                 return (
                   <div
@@ -1187,7 +1344,15 @@ export default function OrderForm() {
                       qty > 0 ? "border-rose-200 shadow-sm shadow-rose-50" : "border-gray-100 hover:border-gray-200"
                     }`}
                   >
-                    <div className={`w-1 h-8 rounded-full shrink-0 transition-all ${qty > 0 ? "bg-rose-400" : "bg-transparent"}`} />
+                    {penImg ? (
+                      <img
+                        src={penImg}
+                        alt={product.productName}
+                        className={`w-12 h-12 rounded-xl object-cover shrink-0 transition-all ${qty > 0 ? "ring-2 ring-rose-300 shadow-sm" : "opacity-75"}`}
+                      />
+                    ) : (
+                      <div className={`w-1 h-8 rounded-full shrink-0 transition-all ${qty > 0 ? "bg-rose-400" : "bg-transparent"}`} />
+                    )}
 
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm font-semibold leading-tight ${qty > 0 ? "text-gray-900" : "text-gray-700"}`}>

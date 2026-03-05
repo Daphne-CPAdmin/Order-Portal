@@ -693,8 +693,8 @@ export default function Dashboard() {
                               <div className="flex flex-col items-end gap-0.5">
                                 <span className="text-indigo-500 font-semibold">{row.openSlots}</span>
                                 {(() => {
-                                  const vialsPerKit = row.kitsNeeded > 0
-                                    ? Math.round((row.totalVials + row.openSlots) / row.kitsNeeded)
+                                  const vialsPerKit = row.totalVials + row.openSlots > 0
+                                    ? Math.round((row.totalVials + row.openSlots) / (row.kitsNeeded + 1))
                                     : 1;
                                   const filledInLastKit = vialsPerKit - row.openSlots;
                                   const pct = Math.round((filledInLastKit / vialsPerKit) * 100);
@@ -734,8 +734,8 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {report.rows.filter((r) => r.openSlots > 0).map((row) => {
-                        const vialsPerKit = row.kitsNeeded > 0
-                          ? Math.round((row.totalVials + row.openSlots) / row.kitsNeeded) : 1;
+                        const vialsPerKit = row.totalVials + row.openSlots > 0
+                          ? Math.round((row.totalVials + row.openSlots) / (row.kitsNeeded + 1)) : 1;
                         const pct = Math.round(((vialsPerKit - row.openSlots) / vialsPerKit) * 100);
                         return (
                           <tr key={row.productName} className="border-b border-amber-50 last:border-0">

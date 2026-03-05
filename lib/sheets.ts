@@ -191,8 +191,9 @@ async function getVialsPerKitMap(): Promise<Map<string, number>> {
     range: "Pricelist!A2:G",
   });
   const map = new Map<string, number>();
+  const norm = (s: string) => s.trim().toLowerCase();
   for (const row of res.data.values || []) {
-    if (row[1]) map.set(row[1], parseInt(row[4]) || 1); // productName -> vialsPerKit
+    if (row[1]) map.set(norm(row[1]), parseInt(row[4]) || 1); // productName -> vialsPerKit
   }
   return map;
 }
@@ -273,7 +274,7 @@ export async function getOrderItems(orderId?: string, batchId?: string): Promise
         category: row[6] || "",
         qtyVials: parseInt(row[7]) || 0,
         pricePerVial: parseFloat(row[8]) || 0,
-        vialsPerKit: vialsMap.get(productName) || 1,
+        vialsPerKit: vialsMap.get(productName.trim().toLowerCase()) || 1,
         handlingFee: parseFloat(row[9]) || 0, // J: handling_fee (per-category flat fee)
         categoryStatus: row[13] || "pending",  // N: category_status
       });
@@ -555,6 +556,9 @@ export async function updateCategoryStatus(
         requestBody: { valueInputOption: "USER_ENTERED", data: updateData },
       });
     }
+    if (newCategoryStatus === "paid") {
+      await setCategoryLock(sheetName, category, true);
+    }
     return;
   }
   throw new Error(`Order ${orderId} not found in any batch sheet`);
@@ -625,8 +629,9 @@ export async function getConsolidationData(batchId?: string) {
     })(),
   ]);
 
-  // Build product lookup
-  const productMap = new Map(products.map((p) => [p.productName, p]));
+  // Build product lookup (normalized key for resilience against whitespace/case drift)
+  const norm = (s: string) => s.trim().toLowerCase();
+  const productMap = new Map(products.map((p) => [norm(p.productName), p]));
 
   // Determine cancelled orders (by order_id — first row status wins)
   const orderStatusMap = new Map<string, string>();
@@ -680,12 +685,12 @@ export async function getConsolidationData(batchId?: string) {
   // Build consolidation rows
   const rows = [];
   for (const [productName, totalVials] of vialsByProduct.entries()) {
-    const product = productMap.get(productName);
+    const product = productMap.get(norm(productName));
     const vialsPerKit = product?.vialsPerKit || 1;
     const pricePerKit = product?.pricePerKit || 0;
     const category = categoryByProduct.get(productName) || "Unknown";
-    const kitsNeeded = Math.ceil(totalVials / vialsPerKit);
-    const openSlots = kitsNeeded * vialsPerKit - totalVials;
+    const kitsNeeded = Math.floor(totalVials / vialsPerKit);
+    const openSlots = vialsPerKit - (totalVials % vialsPerKit || vialsPerKit);
 
     rows.push({
       productName,
