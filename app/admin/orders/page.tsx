@@ -16,6 +16,7 @@ interface OrderRow {
   totalVials: number;
   subtotal: number;
   grandTotal?: number;
+  firstKitCategories: string[];
 }
 
 interface OrderDetail extends OrderRow {
@@ -58,6 +59,7 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [batchFilter, setBatchFilter] = useState<string>("__all__");
   const [search, setSearch] = useState("");
+  const [kit1Only, setKit1Only] = useState(false);
 
   // Side panel
   const [panelOrder, setPanelOrder] = useState<OrderDetail | null>(null);
@@ -321,6 +323,7 @@ export default function OrdersPage() {
   const filtered = orders.filter((o) => {
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (batchFilter !== "__all__" && o.batchId !== batchFilter) return false;
+    if (kit1Only && (!o.firstKitCategories || o.firstKitCategories.length === 0)) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!o.customerName.toLowerCase().includes(q) && !o.telegramUsername.toLowerCase().includes(q)) return false;
@@ -381,6 +384,15 @@ export default function OrdersPage() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setKit1Only((v) => !v)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+              kit1Only ? "bg-amber-400 text-amber-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+            title="Show only orders with items in Kit 1"
+          >
+            🥇 Kit 1
+          </button>
         </div>
 
         {loading ? (
@@ -396,7 +408,7 @@ export default function OrdersPage() {
                   <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Telegram</th>
                   <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Batch</th>
                   <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Date</th>
-                  <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Categories</th>
+                  <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Categories / Kit</th>
                   <th className="text-right px-4 py-3 font-medium">Total</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 w-20" />
@@ -431,6 +443,11 @@ export default function OrdersPage() {
                           {order.categories?.map((c) => (
                             <span key={c} className="px-2 py-0.5 bg-rose-50 text-rose-600 rounded-full text-xs font-medium">
                               {CATEGORY_EMOJI[c] || ""} {c}
+                            </span>
+                          ))}
+                          {order.firstKitCategories?.map((c) => (
+                            <span key={`k1-${c}`} className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold" title={`${c}: order is in Kit 1`}>
+                              🥇 {c}
                             </span>
                           ))}
                         </div>
@@ -531,6 +548,15 @@ export default function OrdersPage() {
                       hour: "2-digit", minute: "2-digit"
                     })}
                   </p>
+                  {panelOrder.firstKitCategories?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {panelOrder.firstKitCategories.map((c) => (
+                        <span key={c} className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-semibold">
+                          🥇 Kit 1 — {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Status */}

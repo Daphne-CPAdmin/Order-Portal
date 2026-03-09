@@ -12,6 +12,39 @@ export async function GET(req: NextRequest) {
       getOrderItems(undefined, batchId),
     ]);
 
+    // Compute kit-1 membership per product (non-cancelled orders only, sorted by date)
+    const productAccumulator = new Map<string, Array<{orderId: string; qty: number; orderDate: string; vialsPerKit: number; category: string}>>();
+    for (const order of orders) {
+      if (order.status === "cancelled") continue;
+      const items = allItems.filter((i) => i.orderId === order.id);
+      for (const item of items) {
+        if (item.qtyVials <= 0) continue;
+        if (!productAccumulator.has(item.productName)) productAccumulator.set(item.productName, []);
+        productAccumulator.get(item.productName)!.push({
+          orderId: order.id,
+          qty: item.qtyVials,
+          orderDate: order.orderDate,
+          vialsPerKit: item.vialsPerKit,
+          category: item.category,
+        });
+      }
+    }
+
+    const kit1Categories = new Map<string, Set<string>>();
+    for (const entries of productAccumulator.values()) {
+      entries.sort((a, b) => a.orderDate.localeCompare(b.orderDate));
+      const vialsPerKit = entries[0]?.vialsPerKit || 1;
+      let cumSum = 0;
+      for (const entry of entries) {
+        const prevCum = cumSum;
+        cumSum += entry.qty;
+        if (prevCum < vialsPerKit) {
+          if (!kit1Categories.has(entry.orderId)) kit1Categories.set(entry.orderId, new Set());
+          kit1Categories.get(entry.orderId)!.add(entry.category);
+        }
+      }
+    }
+
     const ordersWithItems = orders.map((order) => {
       const items = allItems.filter((i) => i.orderId === order.id);
       const categories = new Set(items.map((i) => i.category));
@@ -22,6 +55,7 @@ export async function GET(req: NextRequest) {
         categories: [...categories],
         totalVials: items.reduce((sum, i) => sum + i.qtyVials, 0),
         subtotal,
+        firstKitCategories: [...(kit1Categories.get(order.id) || [])],
       };
     });
 

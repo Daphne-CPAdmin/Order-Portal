@@ -15,6 +15,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navLinks = [
     { href: "/admin/dashboard", label: "Dashboard" },
     { href: "/admin/orders", label: "Orders" },
+    { href: "/admin/kit-roster", label: "Kit Roster" },
     { href: "/admin/products", label: "Products" },
   ];
   // Note: Batch management is embedded in the Dashboard page
