@@ -17,6 +17,7 @@ interface OrderRow {
   subtotal: number;
   grandTotal?: number;
   firstKitCategories: string[];
+  categorySubtotals?: Record<string, number>;
 }
 
 interface OrderDetail extends OrderRow {
@@ -349,6 +350,15 @@ export default function OrdersPage() {
         acc[s] = filtered.filter((o) => o.status === s).length;
         return acc;
       }, {} as Record<string, number>),
+      categoryTotals: (() => {
+        const totals: Record<string, number> = {};
+        for (const o of active) {
+          for (const [cat, amt] of Object.entries(o.categorySubtotals || {})) {
+            totals[cat] = (totals[cat] || 0) + amt;
+          }
+        }
+        return totals;
+      })(),
     };
   }, [filtered]);
 
@@ -420,7 +430,24 @@ export default function OrdersPage() {
               </div>
             </div>
 
-            {/* Row 3: all status counts */}
+            {/* Row 3: per-category collectibles */}
+            {Object.keys(summaryStats.categoryTotals).length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {Object.entries(summaryStats.categoryTotals)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([cat, amt]) => (
+                    <div key={cat} className="bg-rose-50 rounded-xl border border-rose-100 px-4 py-3">
+                      <p className="text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-1 truncate">
+                        {CATEGORY_EMOJI[cat] || ""} {cat}
+                      </p>
+                      <p className="text-base font-bold text-rose-700">₱{formatPrice(amt)}</p>
+                      <p className="text-[10px] text-rose-400 mt-0.5">products only</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Row 4: all status counts */}
             <div className="flex gap-2 flex-wrap">
               {STATUS_OPTIONS.map((s) => (
                 <div key={s} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${STATUS_COLORS[s]}`}>

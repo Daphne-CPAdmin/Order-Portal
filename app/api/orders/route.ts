@@ -52,12 +52,17 @@ export async function GET(req: NextRequest) {
       const items = allItems.filter((i) => i.orderId === order.id);
       const categories = new Set(items.map((i) => i.category));
       const subtotal = items.reduce((sum, i) => sum + i.qtyVials * i.pricePerVial, 0);
+      const categorySubtotals: Record<string, number> = {};
+      for (const item of items) {
+        categorySubtotals[item.category] = (categorySubtotals[item.category] || 0) + item.qtyVials * item.pricePerVial;
+      }
       return {
         ...order,
         items,
         categories: [...categories],
         totalVials: items.reduce((sum, i) => sum + i.qtyVials, 0),
         subtotal,
+        categorySubtotals,
         firstKitCategories: [...(kit1Categories.get(order.id) || [])],
       };
     });
