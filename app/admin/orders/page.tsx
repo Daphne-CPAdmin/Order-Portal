@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { OrderStatus, OrderItem, Batch } from "@/lib/types";
+import { OrderStatus, OrderItem, Batch, Product } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,17 +81,26 @@ export default function OrdersPage() {
   const [quickStatusSaving, setQuickStatusSaving] = useState<OrderStatus | null>(null);
   const [updatingCatKey, setUpdatingCatKey] = useState<string | null>(null);
 
+  // Products + add-item state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addCategory, setAddCategory] = useState("");
+  const [addProductId, setAddProductId] = useState("");
+  const [addQty, setAddQty] = useState(1);
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const [ordersRes, batchesRes] = await Promise.all([
+      const [ordersRes, batchesRes, productsRes] = await Promise.all([
         fetch("/api/orders"),
         fetch("/api/batches"),
+        fetch("/api/products"),
       ]);
       if (ordersRes.ok) setOrders(await ordersRes.json());
       if (batchesRes.ok) setBatches(await batchesRes.json());
+      if (productsRes.ok) setProducts(await productsRes.json());
     } catch (e) {
       console.error(e);
     } finally {
@@ -130,6 +139,10 @@ export default function OrdersPage() {
     setPanelError("");
     setPanelSuccess("");
     setShowDeleteConfirm(false);
+    setShowAddItem(false);
+    setAddCategory("");
+    setAddProductId("");
+    setAddQty(1);
   }
 
   // ── Panel actions ──────────────────────────────────────────────────────────
@@ -299,6 +312,36 @@ export default function OrdersPage() {
     } finally {
       setUpdatingCatKey(null);
     }
+  }
+
+  function handleAddItem() {
+    const product = products.find((p) => p.id === addProductId);
+    if (!product || addQty <= 0 || !panelOrder) return;
+
+    // If product already exists in order, just bump the qty
+    const existing = panelOrder.items.find((i) => i.productName === product.productName);
+    if (existing) {
+      setEditQtys((prev) => ({ ...prev, [existing.id]: (prev[existing.id] ?? existing.qtyVials) + addQty }));
+    } else {
+      const tempId = `new-${Date.now()}-${product.id}`;
+      const newItem: OrderItem = {
+        id: tempId,
+        orderId: panelOrder.id,
+        productName: product.productName,
+        category: product.category,
+        qtyVials: addQty,
+        pricePerVial: product.pricePerVial,
+        vialsPerKit: product.vialsPerKit,
+        handlingFee: product.handlingFee,
+        categoryStatus: "pending",
+      };
+      setPanelOrder((prev) => prev ? { ...prev, items: [...prev.items, newItem] } : prev);
+      setEditQtys((prev) => ({ ...prev, [tempId]: addQty }));
+    }
+
+    setAddProductId("");
+    setAddQty(1);
+    setShowAddItem(false);
   }
 
   async function handleDelete() {
@@ -766,6 +809,75 @@ export default function OrdersPage() {
                             </div>
                           );
                         })}
+                        {/* Add item */}
+                        <div className="rounded-xl border border-dashed border-purple-200 overflow-hidden">
+                          <button
+                            onClick={() => { setShowAddItem((v) => !v); setAddCategory(""); setAddProductId(""); setAddQty(1); }}
+                            className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-purple-600 hover:bg-purple-50 transition-colors"
+                          >
+                            <span>+ Add item to order</span>
+                            <span className="text-purple-300">{showAddItem ? "▲" : "▼"}</span>
+                          </button>
+                          {showAddItem && (
+                            <div className="px-4 pb-4 pt-1 space-y-2 bg-purple-50/40">
+                              {/* Category */}
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Category</label>
+                                <select
+                                  value={addCategory}
+                                  onChange={(e) => { setAddCategory(e.target.value); setAddProductId(""); }}
+                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                                >
+                                  <option value="">— Select category —</option>
+                                  {[...new Set(products.filter((p) => p.active).map((p) => p.category))].sort().map((cat) => (
+                                    <option key={cat} value={cat}>{CATEGORY_EMOJI[cat] || ""} {cat}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {/* Product */}
+                              {addCategory && (
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Product</label>
+                                  <select
+                                    value={addProductId}
+                                    onChange={(e) => setAddProductId(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                                  >
+                                    <option value="">— Select product —</option>
+                                    {products.filter((p) => p.active && p.category === addCategory).map((p) => (
+                                      <option key={p.id} value={p.id}>{p.productName} — ₱{formatPrice(p.pricePerVial)}/vial</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                              {/* Qty + Add button */}
+                              {addProductId && (
+                                <div className="flex items-center gap-2 pt-1">
+                                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest shrink-0">Qty</label>
+                                  <button
+                                    onClick={() => setAddQty((q) => Math.max(1, q - 1))}
+                                    className="w-7 h-7 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center font-bold"
+                                  >−</button>
+                                  <span className="w-6 text-center text-sm font-semibold text-gray-900">{addQty}</span>
+                                  <button
+                                    onClick={() => setAddQty((q) => q + 1)}
+                                    className="w-7 h-7 rounded-full bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center justify-center font-bold"
+                                  >+</button>
+                                  <span className="text-xs text-gray-400 ml-1">
+                                    = ₱{formatPrice(addQty * (products.find((p) => p.id === addProductId)?.pricePerVial || 0))}
+                                  </span>
+                                  <button
+                                    onClick={handleAddItem}
+                                    className="ml-auto px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                                  >
+                                    Add ✓
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
                         {/* Grand total */}
                         <div className="bg-white rounded-xl px-4 py-3 space-y-1 border border-gray-100">
                           <div className="flex justify-between text-xs text-gray-500">
