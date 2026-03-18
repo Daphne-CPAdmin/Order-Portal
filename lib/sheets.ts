@@ -491,6 +491,39 @@ export async function updateOrder(
       });
     }
 
+    // Append rows for newly added products (not previously in the sheet)
+    if (updates.items && updates.items.length > 0) {
+      const coveredProducts = new Set(matchedIndices.map((i) => allRows[i][5] || ""));
+      const newItems = updates.items.filter((i) => i.qtyVials > 0 && !coveredProducts.has(i.productName));
+
+      if (newItems.length > 0) {
+        const firstRow = allRows[matchedIndices[0]];
+        const appendRows = newItems.map((item, idx) => [
+          firstRow[0],                                          // A: order_date
+          `${orderId}-${matchedIndices.length + idx + 1}`,     // B: id
+          orderId,                                              // C: order_id
+          updates.customerName ?? firstRow[3],                  // D: customer_name
+          updates.telegramUsername ?? firstRow[4],              // E: telegram_username
+          item.productName,                                     // F: product_name
+          item.category,                                        // G: category
+          item.qtyVials,                                        // H: qty_item
+          item.pricePerVial,                                    // I: price_per_item
+          handlingByCat[item.category] ?? 0,                   // J: handling_fee
+          categoryTotals[item.category] ?? 0,                  // K: category_total
+          grandTotal !== null ? grandTotal : firstRow[11],     // L: overall_total
+          updates.status ?? firstRow[12],                      // M: status
+          "pending",                                           // N: category_status
+        ]);
+
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: SHEET_ID,
+          range: `${sheetName}!A:N`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: { values: appendRows },
+        });
+      }
+    }
+
     return; // found and updated
   }
 
