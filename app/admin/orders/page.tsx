@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { OrderStatus, OrderItem, Batch, Product } from "@/lib/types";
+import { OrderStatus, OrderItem, Batch, Product, ShippingDetails } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +88,13 @@ export default function OrdersPage() {
   const [addProductId, setAddProductId] = useState("");
   const [addQty, setAddQty] = useState(1);
 
+  // Shipping state
+  const [panelShipping, setPanelShipping] = useState<ShippingDetails | null>(null);
+  const [editShipping, setEditShipping] = useState<ShippingDetails | null>(null);
+  const [showShipping, setShowShipping] = useState(false);
+  const [shippingSaving, setShippingSaving] = useState(false);
+  const [shippingSaved, setShippingSaved] = useState(false);
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchOrders = useCallback(async () => {
@@ -115,6 +122,10 @@ export default function OrdersPage() {
     setPanelSuccess("");
     setPanelLoading(true);
     setPanelOrder(null);
+    setPanelShipping(null);
+    setEditShipping(null);
+    setShowShipping(false);
+    setShippingSaved(false);
     try {
       const res = await fetch(`/api/orders/${orderId}`);
       if (!res.ok) throw new Error("Failed to fetch");
@@ -126,6 +137,21 @@ export default function OrdersPage() {
       const qtys: Record<string, number> = {};
       for (const item of data.items) qtys[item.id] = item.qtyVials;
       setEditQtys(qtys);
+      // Fetch shipping details
+      const tg = data.telegramUsername.replace(/^@/, "");
+      fetch(`/api/shipping?telegram=${encodeURIComponent(tg)}`)
+        .then((r) => r.json())
+        .then((s) => {
+          if (s && s.fullName) {
+            setPanelShipping(s);
+            setEditShipping(s);
+          } else {
+            setEditShipping({ telegramUsername: data.telegramUsername, fullName: "", phone: "", address: "", city: "", province: "", zip: "", notes: "" });
+          }
+        })
+        .catch(() => {
+          setEditShipping({ telegramUsername: data.telegramUsername, fullName: "", phone: "", address: "", city: "", province: "", zip: "", notes: "" });
+        });
     } catch {
       setPanelError("Failed to load order details.");
     } finally {
@@ -143,6 +169,30 @@ export default function OrdersPage() {
     setAddCategory("");
     setAddProductId("");
     setAddQty(1);
+    setPanelShipping(null);
+    setEditShipping(null);
+    setShowShipping(false);
+    setShippingSaved(false);
+  }
+
+  async function handleSaveShipping() {
+    if (!editShipping || !panelOrder) return;
+    setShippingSaving(true);
+    setShippingSaved(false);
+    try {
+      const res = await fetch("/api/shipping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editShipping, telegramUsername: panelOrder.telegramUsername }),
+      });
+      if (res.ok) {
+        setPanelShipping(editShipping);
+        setShippingSaved(true);
+        setTimeout(() => setShippingSaved(false), 3000);
+      }
+    } finally {
+      setShippingSaving(false);
+    }
   }
 
   // ── Panel actions ──────────────────────────────────────────────────────────
@@ -902,6 +952,104 @@ export default function OrdersPage() {
                   })()}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Shipping details */}
+          {panelOrder && !panelLoading && editShipping !== null && (
+            <div className="px-5 pb-4">
+              <button
+                onClick={() => setShowShipping((v) => !v)}
+                className="flex items-center justify-between w-full py-2 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Shipping Details</p>
+                  {panelShipping?.fullName ? (
+                    <span className="text-[10px] text-emerald-600 font-semibold">✓ on file</span>
+                  ) : (
+                    <span className="text-[10px] text-gray-400 italic">none on file</span>
+                  )}
+                </div>
+                <span className="text-gray-300 text-xs">{showShipping ? "▲" : "▾"}</span>
+              </button>
+              {showShipping && (
+                <div className="space-y-2 pt-1">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Full Name</label>
+                      <input
+                        value={editShipping.fullName}
+                        onChange={(e) => setEditShipping((p) => p ? { ...p, fullName: e.target.value } : p)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Phone</label>
+                      <input
+                        value={editShipping.phone}
+                        onChange={(e) => setEditShipping((p) => p ? { ...p, phone: e.target.value } : p)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="09XX..."
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Address</label>
+                    <input
+                      value={editShipping.address}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, address: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="Street address / unit"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">City</label>
+                      <input
+                        value={editShipping.city}
+                        onChange={(e) => setEditShipping((p) => p ? { ...p, city: e.target.value } : p)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="City"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Province</label>
+                      <input
+                        value={editShipping.province}
+                        onChange={(e) => setEditShipping((p) => p ? { ...p, province: e.target.value } : p)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="Province"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">ZIP</label>
+                      <input
+                        value={editShipping.zip}
+                        onChange={(e) => setEditShipping((p) => p ? { ...p, zip: e.target.value } : p)}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        placeholder="ZIP"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Notes (optional)</label>
+                    <input
+                      value={editShipping.notes || ""}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, notes: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="Landmark, delivery instructions…"
+                    />
+                  </div>
+                  <button
+                    onClick={handleSaveShipping}
+                    disabled={shippingSaving}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
+                    {shippingSaving ? "Saving…" : shippingSaved ? "✓ Saved!" : "Save Shipping Details"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

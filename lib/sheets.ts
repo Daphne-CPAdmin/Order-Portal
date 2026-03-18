@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { Product, Order, OrderItem, OrderStatus, Batch, Hauler, AppSettings, DEFAULT_SETTINGS } from "./types";
+import { Product, Order, OrderItem, OrderStatus, Batch, Hauler, AppSettings, DEFAULT_SETTINGS, ShippingDetails } from "./types";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 
@@ -1250,4 +1250,91 @@ export async function updateSettings(settings: AppSettings): Promise<void> {
     valueInputOption: "RAW",
     requestBody: { values: [[JSON.stringify(settings)]] },
   });
+}
+
+// ─── SHIPPING DETAILS ──────────────────────────────────────────────────────
+
+const SHIPPING_SHEET = "Shipping Details";
+
+export async function getShippingDetails(telegramUsername: string): Promise<ShippingDetails | null> {
+  const sheets = await getSheets();
+  const normalized = telegramUsername.toLowerCase().replace(/^@/, "");
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SHIPPING_SHEET}!A2:I`,
+    });
+    const rows = res.data.values || [];
+    const row = rows.find((r) => (r[0] || "").toLowerCase().replace(/^@/, "") === normalized);
+    if (!row) return null;
+    return {
+      telegramUsername: row[0] || "",
+      fullName: row[1] || "",
+      phone: row[2] || "",
+      address: row[3] || "",
+      city: row[4] || "",
+      province: row[5] || "",
+      zip: row[6] || "",
+      notes: row[7] || "",
+      updatedAt: row[8] || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertShippingDetails(details: ShippingDetails): Promise<void> {
+  const sheets = await getSheets();
+  const normalized = details.telegramUsername.toLowerCase().replace(/^@/, "");
+  const now = new Date().toISOString();
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const exists = meta.data.sheets?.some((s) => s.properties?.title === SHIPPING_SHEET);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: SHIPPING_SHEET } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHIPPING_SHEET}!A1:I1`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [["telegram_username", "full_name", "phone", "address", "city", "province", "zip", "notes", "updated_at"]] },
+    });
+  }
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${SHIPPING_SHEET}!A:I`,
+  });
+  const rows = res.data.values || [];
+  const rowIndex = rows.findIndex((r) => (r[0] || "").toLowerCase().replace(/^@/, "") === normalized);
+
+  const newRow = [
+    "@" + normalized,
+    details.fullName,
+    details.phone,
+    details.address,
+    details.city,
+    details.province,
+    details.zip,
+    details.notes || "",
+    now,
+  ];
+
+  if (rowIndex === -1) {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${SHIPPING_SHEET}!A:I`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [newRow] },
+    });
+  } else {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHIPPING_SHEET}!A${rowIndex + 1}:I${rowIndex + 1}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [newRow] },
+    });
+  }
 }

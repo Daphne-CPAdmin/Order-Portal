@@ -93,6 +93,18 @@ export interface AppSettings {
   };
 }
 
+export interface ShippingDetails {
+  telegramUsername: string;
+  fullName: string;
+  phone: string;
+  address: string;
+  city: string;
+  province: string;
+  zip: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   moq: {
     "USP BAC":      { qty: 100, unit: "ampoules" },

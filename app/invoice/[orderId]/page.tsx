@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { ShippingDetails } from "@/lib/types";
 
 function formatPrice(n: number) {
   return n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -52,6 +53,11 @@ export default function InvoicePage() {
   const [error, setError] = useState("");
   const [payingCategory, setPayingCategory] = useState<string | null>(null);
   const [paidCategories, setPaidCategories] = useState<Set<string>>(new Set());
+  const [shipping, setShipping] = useState<ShippingDetails | null>(null);
+  const [showShipping, setShowShipping] = useState(false);
+  const [editShipping, setEditShipping] = useState<ShippingDetails | null>(null);
+  const [shippingSaving, setShippingSaving] = useState(false);
+  const [shippingSaved, setShippingSaved] = useState(false);
 
   async function handleNotifyAdmin(category: string) {
     setPayingCategory(category);
@@ -72,11 +78,48 @@ export default function InvoicePage() {
       .then((r) => r.json())
       .then((data) => {
         if (data.error) setError(data.error);
-        else setInvoice(data);
+        else {
+          setInvoice(data);
+          // Fetch shipping details for this customer
+          const tg = data.telegramUsername;
+          if (tg) {
+            fetch(`/api/shipping?telegram=${encodeURIComponent(tg.replace(/^@/, ""))}`)
+              .then((r) => r.json())
+              .then((s) => {
+                if (s && s.fullName) {
+                  setShipping(s);
+                  setEditShipping(s);
+                } else {
+                  setEditShipping({ telegramUsername: tg, fullName: "", phone: "", address: "", city: "", province: "", zip: "", notes: "" });
+                }
+              })
+              .catch(() => {
+                setEditShipping({ telegramUsername: tg, fullName: "", phone: "", address: "", city: "", province: "", zip: "", notes: "" });
+              });
+          }
+        }
       })
       .catch(() => setError("Failed to load invoice."))
       .finally(() => setLoading(false));
   }, [orderId]);
+
+  async function handleSaveShipping() {
+    if (!editShipping || !invoice) return;
+    setShippingSaving(true);
+    setShippingSaved(false);
+    try {
+      await fetch("/api/shipping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editShipping, telegramUsername: invoice.telegramUsername }),
+      });
+      setShipping(editShipping);
+      setShippingSaved(true);
+      setTimeout(() => setShippingSaved(false), 3000);
+    } finally {
+      setShippingSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -166,6 +209,112 @@ export default function InvoicePage() {
               <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Batch</p>
               <p className="text-xs font-semibold text-gray-600">{invoice.batchId}</p>
             </div>
+          </div>
+
+          {/* Shipping details */}
+          <div className="pb-4 border-b border-gray-100">
+            <button
+              onClick={() => setShowShipping((v) => !v)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div>
+                <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-0.5">Ship To</p>
+                {shipping?.fullName ? (
+                  <p className="text-xs text-gray-700 font-medium">{shipping.fullName} · {shipping.city}</p>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">No shipping details yet</p>
+                )}
+              </div>
+              <span className="text-gray-300 text-xs ml-2 print:hidden">{showShipping ? "▲" : "▾"} Edit</span>
+            </button>
+            {showShipping && editShipping && (
+              <div className="mt-3 space-y-2 print:hidden">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Full Name</label>
+                    <input
+                      value={editShipping.fullName}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, fullName: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="Full name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Phone</label>
+                    <input
+                      value={editShipping.phone}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, phone: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="09XX..."
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Address</label>
+                  <input
+                    value={editShipping.address}
+                    onChange={(e) => setEditShipping((p) => p ? { ...p, address: e.target.value } : p)}
+                    className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                    placeholder="Street address / unit"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">City</label>
+                    <input
+                      value={editShipping.city}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, city: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="City"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Province</label>
+                    <input
+                      value={editShipping.province}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, province: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="Province"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">ZIP</label>
+                    <input
+                      value={editShipping.zip}
+                      onChange={(e) => setEditShipping((p) => p ? { ...p, zip: e.target.value } : p)}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                      placeholder="ZIP"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Notes (optional)</label>
+                  <input
+                    value={editShipping.notes || ""}
+                    onChange={(e) => setEditShipping((p) => p ? { ...p, notes: e.target.value } : p)}
+                    className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300"
+                    placeholder="Landmark, delivery instructions…"
+                  />
+                </div>
+                <button
+                  onClick={handleSaveShipping}
+                  disabled={shippingSaving}
+                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  {shippingSaving ? "Saving…" : shippingSaved ? "✓ Saved!" : "Save Shipping Details"}
+                </button>
+              </div>
+            )}
+            {/* Print-only view of shipping details */}
+            {shipping?.fullName && (
+              <div className="hidden print:block mt-2 text-xs text-gray-700 leading-snug">
+                <p className="font-semibold">{shipping.fullName}</p>
+                {shipping.phone && <p>{shipping.phone}</p>}
+                <p>{shipping.address}</p>
+                <p>{shipping.city}{shipping.province ? `, ${shipping.province}` : ""}{shipping.zip ? ` ${shipping.zip}` : ""}</p>
+                {shipping.notes && <p className="text-gray-400 italic">{shipping.notes}</p>}
+              </div>
+            )}
           </div>
 
           {/* Line items by category */}

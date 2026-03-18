@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Product, AppSettings, DEFAULT_SETTINGS } from "@/lib/types";
+import { Product, AppSettings, DEFAULT_SETTINGS, ShippingDetails } from "@/lib/types";
 
 const CATEGORIES = ["USP BAC", "COSMETICS", "SERUMS", "PENS", "TOPICAL RAWS"] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -186,6 +186,9 @@ export default function OrderForm() {
   const [batchTotals, setBatchTotals] = useState<Map<string, number>>(new Map());
   const [autoLoadedNote, setAutoLoadedNote] = useState<string | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [shipping, setShipping] = useState<ShippingDetails>({ telegramUsername: "", fullName: "", phone: "", address: "", city: "", province: "", zip: "", notes: "" });
+  const [showShipping, setShowShipping] = useState(false);
+  const [shippingSaved, setShippingSaved] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings").then((r) => r.json()).then(setSettings).catch(() => {});
@@ -335,7 +338,17 @@ export default function OrderForm() {
 
   async function handleTelegramBlur() {
     const t = normalizeTelegram(telegram);
-    if (!t || !activeBatchId) return;
+    if (!t) return;
+    // Auto-fetch shipping details
+    fetch(`/api/shipping?telegram=${encodeURIComponent(t)}`)
+      .then((r) => r.json())
+      .then((s) => {
+        if (s && s.fullName) {
+          setShipping(s);
+        }
+      })
+      .catch(() => {});
+    if (!activeBatchId) return;
     try {
       const res = await fetch(`/api/orders/lookup?telegram=${encodeURIComponent(t)}`);
       if (!res.ok) return;
@@ -349,6 +362,20 @@ export default function OrderForm() {
       if (!customerName.trim()) setCustomerName(existing.customerName);
       setIsUpdating(true);
       setAutoLoadedNote(`Existing order #${existing.id} loaded — your changes will replace it.`);
+    } catch { /* silent */ }
+  }
+
+  async function handleSaveShipping() {
+    const t = normalizeTelegram(telegram);
+    if (!t || !shipping.fullName) return;
+    try {
+      await fetch("/api/shipping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...shipping, telegramUsername: `@${t}` }),
+      });
+      setShippingSaved(true);
+      setTimeout(() => setShippingSaved(false), 3000);
     } catch { /* silent */ }
   }
 
@@ -701,6 +728,103 @@ export default function OrderForm() {
                 <span>{autoLoadedNote}</span>
               </div>
             )}
+            {/* Delivery details collapsible */}
+            <div className="rounded-xl border border-gray-100 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowShipping((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-semibold text-gray-500 hover:bg-gray-50 transition-colors"
+              >
+                <span>📦 Delivery details {shipping.fullName ? <span className="text-emerald-600 font-normal">({shipping.city || "on file"})</span> : <span className="text-gray-400 font-normal">(optional)</span>}</span>
+                <span className="text-gray-300">{showShipping ? "▲" : "▾"}</span>
+              </button>
+              {showShipping && (
+                <div className="px-3 pb-3 pt-1 space-y-2 bg-gray-50/50">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Full Name</label>
+                      <input
+                        type="text"
+                        value={shipping.fullName}
+                        onChange={(e) => setShipping((p) => ({ ...p, fullName: e.target.value }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Phone</label>
+                      <input
+                        type="text"
+                        value={shipping.phone}
+                        onChange={(e) => setShipping((p) => ({ ...p, phone: e.target.value }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                        placeholder="09XX..."
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Address</label>
+                    <input
+                      type="text"
+                      value={shipping.address}
+                      onChange={(e) => setShipping((p) => ({ ...p, address: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                      placeholder="Street address / unit"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">City</label>
+                      <input
+                        type="text"
+                        value={shipping.city}
+                        onChange={(e) => setShipping((p) => ({ ...p, city: e.target.value }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                        placeholder="City"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">Province</label>
+                      <input
+                        type="text"
+                        value={shipping.province}
+                        onChange={(e) => setShipping((p) => ({ ...p, province: e.target.value }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                        placeholder="Province"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-400 mb-0.5">ZIP</label>
+                      <input
+                        type="text"
+                        value={shipping.zip}
+                        onChange={(e) => setShipping((p) => ({ ...p, zip: e.target.value }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                        placeholder="ZIP"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-400 mb-0.5">Notes (optional)</label>
+                    <input
+                      type="text"
+                      value={shipping.notes || ""}
+                      onChange={(e) => setShipping((p) => ({ ...p, notes: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-300 bg-white"
+                      placeholder="Landmark, delivery instructions…"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveShipping}
+                    disabled={!telegram.trim() || !shipping.fullName}
+                    className="w-full py-1.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 disabled:opacity-40 rounded-lg text-[11px] font-semibold transition-colors"
+                  >
+                    {shippingSaved ? "✓ Saved!" : "Save Delivery Details"}
+                  </button>
+                </div>
+              )}
+            </div>
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <button
               type="submit"
