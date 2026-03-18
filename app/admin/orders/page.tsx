@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { OrderStatus, OrderItem, Batch } from "@/lib/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -333,6 +333,25 @@ export default function OrdersPage() {
 
   const batchMap = new Map(batches.map((b) => [b.id, b.name]));
 
+  // ── Summary stats ──────────────────────────────────────────────────────────
+
+  const summaryStats = useMemo(() => {
+    const active = filtered.filter((o) => o.status !== "cancelled");
+    const total = (o: OrderRow) => o.grandTotal || o.subtotal;
+    return {
+      totalOrders: filtered.length,
+      productCollectibles: active.reduce((s, o) => s + o.subtotal, 0),
+      handlingFeeCollectibles: active.reduce((s, o) => s + Math.max(0, (o.grandTotal || o.subtotal) - o.subtotal), 0),
+      paidAmount:    filtered.filter((o) => o.status === "paid").reduce((s, o) => s + total(o), 0),
+      waitingAmount: filtered.filter((o) => o.status === "waiting").reduce((s, o) => s + total(o), 0),
+      unpaidAmount:  filtered.filter((o) => o.status === "pending").reduce((s, o) => s + total(o), 0),
+      statusCounts: STATUS_OPTIONS.reduce((acc, s) => {
+        acc[s] = filtered.filter((o) => o.status === s).length;
+        return acc;
+      }, {} as Record<string, number>),
+    };
+  }, [filtered]);
+
   // Computed totals in panel
   const panelSubtotal = panelOrder?.items.reduce(
     (sum, item) => sum + (editQtys[item.id] ?? item.qtyVials) * item.pricePerVial, 0
@@ -351,6 +370,68 @@ export default function OrdersPage() {
             <p className="text-sm text-gray-500 mt-0.5">{filtered.length} of {orders.length} orders</p>
           </div>
         </div>
+
+        {/* Summary cards */}
+        {!loading && orders.length > 0 && (
+          <div className="mb-6 space-y-3">
+
+            {/* Row 1: order count + financial overview */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{summaryStats.totalOrders}</p>
+                {(statusFilter !== "all" || batchFilter !== "__all__" || search || kit1Only) && (
+                  <p className="text-[10px] text-gray-400 mt-0.5">of {orders.length} total</p>
+                )}
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Product Collectibles</p>
+                <p className="text-xl font-bold text-gray-900">₱{formatPrice(summaryStats.productCollectibles)}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">products only</p>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Handling Fees</p>
+                <p className="text-xl font-bold text-gray-900">₱{formatPrice(summaryStats.handlingFeeCollectibles)}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">fees collectible</p>
+              </div>
+              <div className="bg-purple-50 rounded-xl border border-purple-100 px-4 py-3">
+                <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">Grand Total</p>
+                <p className="text-xl font-bold text-purple-700">₱{formatPrice(summaryStats.productCollectibles + summaryStats.handlingFeeCollectibles)}</p>
+                <p className="text-[10px] text-purple-400 mt-0.5">all collectibles</p>
+              </div>
+            </div>
+
+            {/* Row 2: payment status breakdown */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-blue-50 rounded-xl border border-blue-100 px-4 py-3">
+                <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Paid</p>
+                <p className="text-xl font-bold text-blue-700">₱{formatPrice(summaryStats.paidAmount)}</p>
+                <p className="text-[10px] text-blue-400 mt-0.5">{summaryStats.statusCounts.paid} order{summaryStats.statusCounts.paid !== 1 ? "s" : ""}</p>
+              </div>
+              <div className="bg-orange-50 rounded-xl border border-orange-100 px-4 py-3">
+                <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1">Waiting</p>
+                <p className="text-xl font-bold text-orange-700">₱{formatPrice(summaryStats.waitingAmount)}</p>
+                <p className="text-[10px] text-orange-400 mt-0.5">{summaryStats.statusCounts.waiting} order{summaryStats.statusCounts.waiting !== 1 ? "s" : ""}</p>
+              </div>
+              <div className="bg-yellow-50 rounded-xl border border-yellow-100 px-4 py-3">
+                <p className="text-[10px] font-bold text-yellow-500 uppercase tracking-widest mb-1">Unpaid</p>
+                <p className="text-xl font-bold text-yellow-700">₱{formatPrice(summaryStats.unpaidAmount)}</p>
+                <p className="text-[10px] text-yellow-500 mt-0.5">{summaryStats.statusCounts.pending} order{summaryStats.statusCounts.pending !== 1 ? "s" : ""}</p>
+              </div>
+            </div>
+
+            {/* Row 3: all status counts */}
+            <div className="flex gap-2 flex-wrap">
+              {STATUS_OPTIONS.map((s) => (
+                <div key={s} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${STATUS_COLORS[s]}`}>
+                  <span className="capitalize">{s}</span>
+                  <span className="bg-white/60 rounded-full px-1.5 font-bold">{summaryStats.statusCounts[s]}</span>
+                </div>
+              ))}
+            </div>
+
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex gap-3 mb-5 flex-wrap items-center">

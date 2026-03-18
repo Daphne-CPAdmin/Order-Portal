@@ -45,7 +45,9 @@ export async function GET(req: NextRequest) {
     // Index order metadata
     const orderMeta = new Map(orders.map((o) => [o.id, o]));
 
-    // Group items by product, skip cancelled orders
+    const KIT_CATEGORIES = new Set(["USP BAC", "SERUMS"]);
+
+    // Group items by product, skip cancelled orders and non-kit categories
     const productItems = new Map<
       string,
       Array<{
@@ -65,6 +67,7 @@ export async function GET(req: NextRequest) {
       if (item.qtyVials <= 0) continue;
       const order = orderMeta.get(item.orderId);
       if (!order || order.status === "cancelled") continue;
+      if (!KIT_CATEGORIES.has(item.category)) continue;
 
       if (!productItems.has(item.productName)) productItems.set(item.productName, []);
       productItems.get(item.productName)!.push({

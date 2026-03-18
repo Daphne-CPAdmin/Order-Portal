@@ -194,6 +194,7 @@ export default function OrderForm() {
   const [paidCatKeys, setPaidCatKeys] = useState<Set<string>>(new Set());
   const [activeBatchId, setActiveBatchId] = useState<string>("");
   const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
+  const [orderingLocks, setOrderingLocks] = useState<Record<string, boolean>>({});
   const [batchTotals, setBatchTotals] = useState<Map<string, number>>(new Map());
   const [autoLoadedNote, setAutoLoadedNote] = useState<string | null>(null);
 
@@ -216,6 +217,10 @@ export default function OrderForm() {
           fetch(`/api/category-locks?batch=${encodeURIComponent(batchId)}`)
             .then((r) => r.json())
             .then(setCategoryLocks)
+            .catch(() => {});
+          fetch(`/api/ordering-locks?batch=${encodeURIComponent(batchId)}`)
+            .then((r) => r.json())
+            .then(setOrderingLocks)
             .catch(() => {});
         }
         const param = batchId ? `?batch=${encodeURIComponent(batchId)}` : "";
@@ -592,7 +597,7 @@ export default function OrderForm() {
                     </div>
                     <div className="space-y-1">
                       {catItems.map(({ product, qty }) => {
-                        const showKitHint = product.vialsPerKit > 1 && (product.category === "SERUMS" || product.category === "USP BAC");
+                        const showKitHint = product.vialsPerKit > 1 && product.category === "USP BAC";
                         const rem = qty % product.vialsPerKit;
                         const full = Math.floor(qty / product.vialsPerKit);
                         return (
@@ -1068,11 +1073,13 @@ export default function OrderForm() {
                     <p className={`text-sm font-medium leading-none ${isActive ? "text-purple-800" : "text-gray-800"}`}>{cat}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5 leading-none truncate">{meta.description}</p>
                   </div>
-                  {catQty > 0 && (
+                  {orderingLocks[cat] ? (
+                    <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Closed</span>
+                  ) : catQty > 0 ? (
                     <span className={`shrink-0 text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center ${
                       isActive ? "bg-purple-700 text-white" : "bg-purple-100 text-purple-700"
                     }`}>{catQty}</span>
-                  )}
+                  ) : null}
                 </button>
               );
             })}
@@ -1132,6 +1139,17 @@ export default function OrderForm() {
               ) : null;
             })()}
           </div>
+
+          {/* Ordering closed banner */}
+          {orderingLocks[activeCategory] && (
+            <div className="mb-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-2.5">
+              <span className="text-lg">🚫</span>
+              <div>
+                <p className="text-sm font-bold text-red-700">Ordering closed for {activeCategory}</p>
+                <p className="text-xs text-red-500 mt-0.5">The admin has closed new orders for this category. Contact the haul admin for assistance.</p>
+              </div>
+            </div>
+          )}
 
           {/* Admin category note */}
           {categoryNotes[activeCategory] && (

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrders, createOrder, getOrderItems, getActiveBatch, findOrdersByTelegramInBatch, deleteOrder } from "@/lib/sheets";
+import { getOrders, createOrder, getOrderItems, getActiveBatch, findOrdersByTelegramInBatch, deleteOrder, getOrderingLocks } from "@/lib/sheets";
 import { sendTelegram, buildNewOrderMessage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
       getOrderItems(undefined, batchId),
     ]);
 
+    const KIT_CATEGORIES = new Set(["USP BAC", "SERUMS"]);
+
     // Compute kit-1 membership per product (non-cancelled orders only, sorted by date)
     const productAccumulator = new Map<string, Array<{orderId: string; qty: number; orderDate: string; vialsPerKit: number; category: string}>>();
     for (const order of orders) {
@@ -19,6 +21,7 @@ export async function GET(req: NextRequest) {
       const items = allItems.filter((i) => i.orderId === order.id);
       for (const item of items) {
         if (item.qtyVials <= 0) continue;
+        if (!KIT_CATEGORIES.has(item.category)) continue;
         if (!productAccumulator.has(item.productName)) productAccumulator.set(item.productName, []);
         productAccumulator.get(item.productName)!.push({
           orderId: order.id,
@@ -91,6 +94,19 @@ export async function POST(req: NextRequest) {
     if (!effectiveBatchId) {
       const activeBatch = await getActiveBatch();
       effectiveBatchId = activeBatch?.id || "";
+    }
+
+    // Check ordering locks — reject if any ordered category is locked
+    if (effectiveBatchId) {
+      const orderingLocks = await getOrderingLocks(effectiveBatchId);
+      const orderedCategories: string[] = [...new Set<string>(items.map((i: { category: string }) => i.category))];
+      const lockedCategories = orderedCategories.filter((cat) => orderingLocks[cat]);
+      if (lockedCategories.length > 0) {
+        return NextResponse.json(
+          { error: `Ordering is currently closed for: ${lockedCategories.join(", ")}. Please contact the haul admin.` },
+          { status: 403 }
+        );
+      }
     }
 
     // Upsert: delete any existing order for this customer in this batch

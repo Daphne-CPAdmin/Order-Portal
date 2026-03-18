@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrders, getOrderItems, getCategoryLocks } from "@/lib/sheets";
+import { getOrders, getOrderItems } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
-
-    const locks = await getCategoryLocks(order.batchId);
 
     // Group items by category
     const catMap = new Map<string, typeof items>();
@@ -37,7 +35,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       handling: catItems[0]?.handlingFee || 0,
       subtotal: catItems.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0),
       categoryStatus: catItems[0]?.categoryStatus || "pending",
-      paymentOpen: locks[category] === true,
+      paymentOpen: true, // always allow customers to notify admin of payment
     }));
 
     const subtotal = items.reduce((s, i) => s + i.qtyVials * i.pricePerVial, 0);

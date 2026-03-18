@@ -1066,6 +1066,84 @@ export async function setCategoryLock(
   }
 }
 
+// ─── ORDERING LOCKS ───────────────────────────────────────────────────────
+// Sheet: OrderingLocks — columns: A=batch_id, B=category, C=locked (TRUE/FALSE), D=locked_at
+
+async function ensureOrderingLocksSheet(
+  sheets: Awaited<ReturnType<typeof getSheets>>
+): Promise<void> {
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const exists = (spreadsheet.data.sheets || []).some(
+    (s) => s.properties?.title === "OrderingLocks"
+  );
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: "OrderingLocks" } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: "OrderingLocks!A1:D1",
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [["batch_id", "category", "locked", "locked_at"]] },
+    });
+  }
+}
+
+export async function getOrderingLocks(batchId: string): Promise<Record<string, boolean>> {
+  const sheets = await getSheets();
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: "OrderingLocks!A2:D",
+    });
+    const locks: Record<string, boolean> = {};
+    for (const row of res.data.values || []) {
+      if (row[0] === batchId) {
+        locks[row[1]] = row[2]?.toUpperCase() === "TRUE";
+      }
+    }
+    return locks;
+  } catch {
+    return {};
+  }
+}
+
+export async function setOrderingLock(
+  batchId: string,
+  category: string,
+  locked: boolean
+): Promise<void> {
+  const sheets = await getSheets();
+  await ensureOrderingLocksSheet(sheets);
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: "OrderingLocks!A:D",
+  });
+  const rows = res.data.values || [];
+  const rowIndex = rows.findIndex((r) => r[0] === batchId && r[1] === category);
+  const now = new Date().toISOString();
+  if (rowIndex === -1) {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: "OrderingLocks!A:D",
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [[batchId, category, locked ? "TRUE" : "FALSE", locked ? now : ""]],
+      },
+    });
+  } else {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `OrderingLocks!A${rowIndex + 1}:D${rowIndex + 1}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [[batchId, category, locked ? "TRUE" : "FALSE", locked ? now : ""]],
+      },
+    });
+  }
+}
+
 export async function updateCategoryNote(category: string, note: string): Promise<void> {
   const sheets = await getSheets();
   const res = await sheets.spreadsheets.values.get({

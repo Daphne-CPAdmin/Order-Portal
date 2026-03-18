@@ -81,6 +81,8 @@ export default function Dashboard() {
   const [catCopied, setCatCopied] = useState<string | null>(null);
   const [categoryLocks, setCategoryLocks] = useState<Record<string, boolean>>({});
   const [lockingCategory, setLockingCategory] = useState<string | null>(null);
+  const [orderingLocks, setOrderingLocks] = useState<Record<string, boolean>>({});
+  const [lockingOrderingCategory, setLockingOrderingCategory] = useState<string | null>(null);
 
   const fetchBatches = useCallback(async () => {
     setBatchesLoading(true);
@@ -128,8 +130,13 @@ export default function Dashboard() {
         .then((r) => r.json())
         .then(setCategoryLocks)
         .catch(() => {});
+      fetch(`/api/ordering-locks?batch=${encodeURIComponent(selectedBatch)}`)
+        .then((r) => r.json())
+        .then(setOrderingLocks)
+        .catch(() => {});
     } else {
       setCategoryLocks({});
+      setOrderingLocks({});
     }
   }, [selectedBatch, fetchReport, fetchOrders]);
 
@@ -189,6 +196,21 @@ export default function Dashboard() {
         setShowReminderModal(true);
       }
     } finally { setSendingReminders(false); }
+  }
+
+  async function handleToggleOrderingLock(category: string) {
+    const newLocked = !orderingLocks[category];
+    setLockingOrderingCategory(category);
+    try {
+      await fetch("/api/ordering-locks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId: selectedBatch, category, locked: newLocked }),
+      });
+      setOrderingLocks((prev) => ({ ...prev, [category]: newLocked }));
+    } finally {
+      setLockingOrderingCategory(null);
+    }
   }
 
   async function handleToggleLock(category: string) {
@@ -609,6 +631,21 @@ export default function Dashboard() {
                       <span className="text-xs text-gray-400">
                         Handling: ₱{formatPrice(report.categoryFees[category] || 0)}
                       </span>
+                      {/* Lock ordering for this category */}
+                      {selectedBatch !== "__all__" && (
+                        <button
+                          onClick={() => handleToggleOrderingLock(category)}
+                          disabled={lockingOrderingCategory === category}
+                          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all border ${
+                            orderingLocks[category]
+                              ? "bg-red-100 text-red-700 border-red-200 hover:bg-gray-50 hover:text-gray-600 hover:border-gray-200"
+                              : "bg-white text-gray-500 border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                          }`}
+                          title={orderingLocks[category] ? "Ordering is closed — click to reopen" : "Click to close ordering for this category"}
+                        >
+                          {lockingOrderingCategory === category ? "…" : orderingLocks[category] ? "🚫 Ordering Closed" : "✅ Ordering Open"}
+                        </button>
+                      )}
                       {/* Lock/unlock payment for this category */}
                       {selectedBatch !== "__all__" && (
                         <button
