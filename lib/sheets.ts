@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { Product, Order, OrderItem, OrderStatus, Batch, Hauler } from "./types";
+import { Product, Order, OrderItem, OrderStatus, Batch, Hauler, AppSettings, DEFAULT_SETTINGS } from "./types";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 
@@ -149,14 +149,19 @@ const BATCH_HEADER = [
   "handling_fee", "category_total", "overall_total", "status", "category_status",
 ];
 
-function pensHandlingFee(n: number): number {
+function pensHandlingFee(n: number, cfg = DEFAULT_SETTINGS.handlingFees.pens): number {
   if (n === 0) return 0;
-  return 150 + Math.floor((n - 1) / 5) * 50;
+  return cfg.baseFee + Math.floor((n - 1) / cfg.tierSize) * cfg.tierIncrement;
 }
 
-function uspBacHandlingFee(n: number): number {
+function uspBacHandlingFee(n: number, cfg = DEFAULT_SETTINGS.handlingFees.uspBac): number {
   if (n === 0) return 0;
-  return Math.ceil(n / 50) * 50;
+  return Math.ceil(n / cfg.tierSize) * cfg.feePerTier;
+}
+
+function topicalRawsHandlingFeeFromSettings(totalGrams: number, varieties: number, cfg = DEFAULT_SETTINGS.handlingFees.topicalRaws): number {
+  if (totalGrams === 0) return 0;
+  return cfg.baseFee + varieties * cfg.perVarietyIncrement;
 }
 
 async function getOrderSheetNames(
@@ -415,24 +420,23 @@ export async function updateOrder(
     const itemQtyMap: Map<string, number> = new Map(); // productName -> qtyVials
 
     if (updates.items && updates.items.length > 0) {
-      const products = await getProducts();
+      const [products, appSettings] = await Promise.all([getProducts(), getSettings()]);
       const categoryFlatFees: Record<string, number> = {};
       for (const p of products) {
         if (!categoryFlatFees[p.category]) categoryFlatFees[p.category] = p.handlingFee;
       }
 
       const activeItems = updates.items.filter((i) => i.qtyVials >= 0);
-      const totalPens = activeItems
-        .filter((i) => i.category === "PENS")
-        .reduce((s, i) => s + i.qtyVials, 0);
-      const totalUspBac = activeItems
-        .filter((i) => i.category === "USP BAC")
-        .reduce((s, i) => s + i.qtyVials, 0);
+      const totalPens = activeItems.filter((i) => i.category === "PENS").reduce((s, i) => s + i.qtyVials, 0);
+      const totalUspBac = activeItems.filter((i) => i.category === "USP BAC").reduce((s, i) => s + i.qtyVials, 0);
+      const totalTopical = activeItems.filter((i) => i.category === "TOPICAL RAWS").reduce((s, i) => s + i.qtyVials, 0);
+      const topicalVarieties = activeItems.filter((i) => i.category === "TOPICAL RAWS" && i.qtyVials >= appSettings.handlingFees.topicalRaws.varietyThreshold).length;
 
       const categories = new Set(activeItems.map((i) => i.category));
       for (const cat of categories) {
-        if (cat === "PENS") handlingByCat[cat] = pensHandlingFee(totalPens);
-        else if (cat === "USP BAC") handlingByCat[cat] = uspBacHandlingFee(totalUspBac);
+        if (cat === "PENS") handlingByCat[cat] = pensHandlingFee(totalPens, appSettings.handlingFees.pens);
+        else if (cat === "USP BAC") handlingByCat[cat] = uspBacHandlingFee(totalUspBac, appSettings.handlingFees.uspBac);
+        else if (cat === "TOPICAL RAWS") handlingByCat[cat] = topicalRawsHandlingFeeFromSettings(totalTopical, topicalVarieties, appSettings.handlingFees.topicalRaws);
         else handlingByCat[cat] = categoryFlatFees[cat] || 100;
       }
 
@@ -1209,4 +1213,41 @@ export async function updateCategoryNote(category: string, note: string): Promis
       requestBody: { values: [[category, note]] },
     });
   }
+}
+
+// ─── APP SETTINGS ──────────────────────────────────────────────────────────
+
+const SETTINGS_SHEET = "Settings";
+
+export async function getSettings(): Promise<AppSettings> {
+  const sheets = await getSheets();
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SETTINGS_SHEET}!A1`,
+    });
+    const raw = res.data.values?.[0]?.[0];
+    if (!raw) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export async function updateSettings(settings: AppSettings): Promise<void> {
+  const sheets = await getSheets();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const exists = meta.data.sheets?.some((s) => s.properties?.title === SETTINGS_SHEET);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: SETTINGS_SHEET } } }] },
+    });
+  }
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${SETTINGS_SHEET}!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [[JSON.stringify(settings)]] },
+  });
 }

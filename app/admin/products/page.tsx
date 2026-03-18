@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Product } from "@/lib/types";
+import { Product, AppSettings, DEFAULT_SETTINGS } from "@/lib/types";
 
 const CATEGORY_OPTIONS = ["USP BAC", "COSMETICS", "SERUMS", "PENS", "TOPICAL RAWS"];
 
@@ -36,6 +36,11 @@ export default function ProductsPage() {
   const [categoryNotes, setCategoryNotes] = useState<Record<string, string>>({});
   const [notesSaving, setNotesSaving] = useState<Record<string, boolean>>({});
   const [notesSaved, setNotesSaved] = useState<Record<string, boolean>>({});
+
+  // App Settings state
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   async function fetchProducts() {
     setLoading(true);
@@ -81,9 +86,33 @@ export default function ProductsPage() {
     }
   }
 
+  async function fetchSettings() {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) setSettings(await res.json());
+    } catch { /* silently ignore */ }
+  }
+
+  async function saveSettings() {
+    setSettingsSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      if (res.ok) {
+        setSettingsSaved(true);
+        setTimeout(() => setSettingsSaved(false), 2500);
+      }
+    } catch { /* silently ignore */ }
+    finally { setSettingsSaving(false); }
+  }
+
   useEffect(() => {
     fetchProducts();
     fetchCategoryNotes();
+    fetchSettings();
   }, []);
 
   function openAdd() {
@@ -256,6 +285,161 @@ export default function ProductsPage() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Category Settings card */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8">
+        <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-gray-700">Category Settings</h2>
+            <p className="text-xs text-gray-400 mt-0.5">MOQ shown on the customer order form + tiered handling fee parameters.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {settingsSaved && <span className="text-green-600 text-sm font-medium">Saved ✓</span>}
+            <button
+              onClick={saveSettings}
+              disabled={settingsSaving}
+              className="px-4 py-1.5 bg-rose-600 text-white text-xs rounded-lg hover:bg-rose-700 disabled:opacity-50 transition-colors font-medium"
+            >
+              {settingsSaving ? "Saving…" : "Save All"}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-6">
+
+          {/* MOQ section */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Minimum Order Quantities (MOQ)</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {CATEGORY_OPTIONS.map((cat) => (
+                <div key={cat} className="border border-gray-100 rounded-xl p-3 bg-gray-50">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">{cat}</p>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-gray-400 mb-1">Qty</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={settings.moq[cat]?.qty ?? ""}
+                        onChange={(e) => setSettings((s) => ({ ...s, moq: { ...s.moq, [cat]: { ...s.moq[cat], qty: parseInt(e.target.value) || 0 } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-gray-400 mb-1">Unit</label>
+                      <input
+                        type="text"
+                        value={settings.moq[cat]?.unit ?? ""}
+                        onChange={(e) => setSettings((s) => ({ ...s, moq: { ...s.moq, [cat]: { ...s.moq[cat], unit: e.target.value } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                        placeholder="e.g. boxes"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tiered handling fee section */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Tiered Handling Fees</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+              {/* PENS */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">✏️ PENS — tiered</p>
+                <p className="text-[10px] text-gray-400 mb-2">Formula: base + floor((n−1) / tier size) × increment</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: "Base fee (₱)", key: "baseFee" as const },
+                    { label: "Tier size",    key: "tierSize" as const },
+                    { label: "Increment (₱)",key: "tierIncrement" as const },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+                      <input
+                        type="number" min={0}
+                        value={settings.handlingFees.pens[key]}
+                        onChange={(e) => setSettings((s) => ({ ...s, handlingFees: { ...s.handlingFees, pens: { ...s.handlingFees.pens, [key]: parseInt(e.target.value) || 0 } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* USP BAC */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">💉 USP BAC — per N ampoules</p>
+                <p className="text-[10px] text-gray-400 mb-2">Formula: ceil(n / tier size) × fee per tier</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: "Tier size",     key: "tierSize" as const },
+                    { label: "Fee/tier (₱)",  key: "feePerTier" as const },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+                      <input
+                        type="number" min={0}
+                        value={settings.handlingFees.uspBac[key]}
+                        onChange={(e) => setSettings((s) => ({ ...s, handlingFees: { ...s.handlingFees, uspBac: { ...s.handlingFees.uspBac, [key]: parseInt(e.target.value) || 0 } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* TOPICAL RAWS */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">🧴 TOPICAL RAWS — variety-based</p>
+                <p className="text-[10px] text-gray-400 mb-2">Formula: base + (varieties ≥ threshold g) × increment</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: "Base fee (₱)",   key: "baseFee" as const },
+                    { label: "Variety min (g)", key: "varietyThreshold" as const },
+                    { label: "Increment (₱)",  key: "perVarietyIncrement" as const },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+                      <input
+                        type="number" min={0}
+                        value={settings.handlingFees.topicalRaws[key]}
+                        onChange={(e) => setSettings((s) => ({ ...s, handlingFees: { ...s.handlingFees, topicalRaws: { ...s.handlingFees.topicalRaws, [key]: parseInt(e.target.value) || 0 } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* COSMETICS */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">✨ COSMETICS — bulk discount</p>
+                <p className="text-[10px] text-gray-400 mb-2">If qty per item exceeds threshold, discount applies per box</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: "Bulk threshold", key: "bulkThreshold" as const },
+                    { label: "Discount/box (₱)", key: "bulkDiscount" as const },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+                      <input
+                        type="number" min={0}
+                        value={settings.handlingFees.cosmetics[key]}
+                        onChange={(e) => setSettings((s) => ({ ...s, handlingFees: { ...s.handlingFees, cosmetics: { ...s.handlingFees.cosmetics, [key]: parseInt(e.target.value) || 0 } } }))}
+                        className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
         </div>
       </div>
 

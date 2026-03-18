@@ -1,18 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Product } from "@/lib/types";
+import { Product, AppSettings, DEFAULT_SETTINGS } from "@/lib/types";
 
 const CATEGORIES = ["USP BAC", "COSMETICS", "SERUMS", "PENS", "TOPICAL RAWS"] as const;
 type Category = (typeof CATEGORIES)[number];
 
-const MOQ: Partial<Record<Category, { qty: number; unit: string }>> = {
-  "USP BAC":      { qty: 100, unit: "ampoules" },
-  COSMETICS:      { qty: 30,  unit: "boxes" },
-  SERUMS:         { qty: 10,  unit: "kits" },
-  PENS:           { qty: 30,  unit: "pens" },
-  "TOPICAL RAWS": { qty: 50,  unit: "g total" },
-};
 
 const CATEGORY_META: Record<Category, { emoji: string; description: string }> = {
   "USP BAC":      { emoji: "💉", description: "Bacteriostatic water" },
@@ -24,8 +17,6 @@ const CATEGORY_META: Record<Category, { emoji: string; description: string }> = 
 
 const MULTI_ITEM_MAX = 10;
 const USP_BAC_MAX = 200;
-const COSMETICS_BULK_THRESHOLD = 3;
-const COSMETICS_BULK_DISCOUNT = 100;
 
 function normalizeTelegram(raw: string): string {
   return raw.trim().replace(/^@/, "").toLowerCase();
@@ -44,10 +35,9 @@ type LookupOrder = {
   grandTotal?: number;
 };
 
-function pensHandlingFee(n: number) {
+function pensHandlingFee(n: number, cfg = DEFAULT_SETTINGS.handlingFees.pens) {
   if (n === 0) return 0;
-  // ₱100 for 1–5 pens; +₱50 per every 5 pens after that
-  return 150 + Math.floor((n - 1) / 5) * 50;
+  return cfg.baseFee + Math.floor((n - 1) / cfg.tierSize) * cfg.tierIncrement;
 }
 
 const PEN_IMAGE_KEYS = new Set(["black","brown","coral","dark-blue","deep-purple","gold","pink","purple","red","silver","tiffany-blue"]);
@@ -79,16 +69,14 @@ const PEN_ACCENT: Record<string, { solid: string; light: string }> = {
   "tiffany-blue": { solid: "#0ABAB5", light: "#e8f9f9" },
 };
 
-function uspBacHandlingFee(n: number) {
+function uspBacHandlingFee(n: number, cfg = DEFAULT_SETTINGS.handlingFees.uspBac) {
   if (n === 0) return 0;
-  // ₱50 per 50 items (or part thereof): 1–50 = ₱50, 51–100 = ₱100, 101–150 = ₱150, …
-  return Math.ceil(n / 50) * 50;
+  return Math.ceil(n / cfg.tierSize) * cfg.feePerTier;
 }
 
-function topicalRawsHandlingFee(totalGrams: number, varietiesAt10g: number) {
+function topicalRawsHandlingFee(totalGrams: number, varieties: number, cfg = DEFAULT_SETTINGS.handlingFees.topicalRaws) {
   if (totalGrams === 0) return 0;
-  // ₱150 base; +₱50 per variety that reaches 10g
-  return 150 + varietiesAt10g * 50;
+  return cfg.baseFee + varieties * cfg.perVarietyIncrement;
 }
 
 function formatPrice(n: number) {
@@ -197,8 +185,10 @@ export default function OrderForm() {
   const [orderingLocks, setOrderingLocks] = useState<Record<string, boolean>>({});
   const [batchTotals, setBatchTotals] = useState<Map<string, number>>(new Map());
   const [autoLoadedNote, setAutoLoadedNote] = useState<string | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
+    fetch("/api/settings").then((r) => r.json()).then(setSettings).catch(() => {});
     fetch("/api/products")
       .then((r) => r.json())
       .then((data) => { setProducts(data.filter((p: Product) => p.active)); setLoading(false); })
@@ -271,21 +261,20 @@ export default function OrderForm() {
   const totalPens = itemsList.filter((i) => i.product.category === "PENS").reduce((s, i) => s + i.qty, 0);
   const totalUspBac = itemsList.filter((i) => i.product.category === "USP BAC").reduce((s, i) => s + i.qty, 0);
   const totalTopicalRaws = itemsList.filter((i) => i.product.category === "TOPICAL RAWS").reduce((s, i) => s + i.qty, 0);
-  const topicalRawsVarieties10g = itemsList.filter((i) => i.product.category === "TOPICAL RAWS" && i.qty >= 10).length;
+  const topicalRawsVarieties10g = itemsList.filter((i) => i.product.category === "TOPICAL RAWS" && i.qty >= settings.handlingFees.topicalRaws.varietyThreshold).length;
   const handlingByCat = new Map<string, number>();
   for (const cat of categoriesOrdered) {
-    if (cat === "PENS") handlingByCat.set(cat, pensHandlingFee(totalPens));
-    else if (cat === "USP BAC") handlingByCat.set(cat, uspBacHandlingFee(totalUspBac));
-    else if (cat === "TOPICAL RAWS") handlingByCat.set(cat, topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g));
+    if (cat === "PENS") handlingByCat.set(cat, pensHandlingFee(totalPens, settings.handlingFees.pens));
+    else if (cat === "USP BAC") handlingByCat.set(cat, uspBacHandlingFee(totalUspBac, settings.handlingFees.uspBac));
+    else if (cat === "TOPICAL RAWS") handlingByCat.set(cat, topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g, settings.handlingFees.topicalRaws));
     else handlingByCat.set(cat, products.find((p) => p.category === cat)?.handlingFee || 100);
   }
 
   const subtotal = [...subtotalByCat.values()].reduce((a, b) => a + b, 0);
   const handlingTotal = [...handlingByCat.values()].reduce((a, b) => a + b, 0);
   const cosmeticsItems = itemsList.filter((i) => i.product.category === "COSMETICS");
-  // Discount is per-product: if qty > 3 of the SAME item, ALL boxes get ₱100 off
   const cosmeticsDiscount = cosmeticsItems.reduce((s, i) => {
-    return s + (i.qty > COSMETICS_BULK_THRESHOLD ? i.qty * COSMETICS_BULK_DISCOUNT : 0);
+    return s + (i.qty > settings.handlingFees.cosmetics.bulkThreshold ? i.qty * settings.handlingFees.cosmetics.bulkDiscount : 0);
   }, 0);
   const grandTotal = subtotal + handlingTotal - cosmeticsDiscount;
 
@@ -951,13 +940,13 @@ export default function OrderForm() {
         <>Handling fee: <strong>₱150 base</strong> · <strong>+₱50 per variety at 10g</strong></>
       ) : (
         <>
-          <strong>₱{formatPrice(topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g))} handling</strong> for {totalTopicalRaws}g ordered
-          <br /><span className={totalTopicalRaws < 50 ? "text-amber-500 font-semibold" : "text-teal-400"}>
-            {totalTopicalRaws < 50
-              ? `MOQ: ${50 - totalTopicalRaws}g more needed across all items`
+          <strong>₱{formatPrice(topicalRawsHandlingFee(totalTopicalRaws, topicalRawsVarieties10g, settings.handlingFees.topicalRaws))} handling</strong> for {totalTopicalRaws}g ordered
+          <br /><span className={totalTopicalRaws < (settings.moq["TOPICAL RAWS"]?.qty ?? 50) ? "text-amber-500 font-semibold" : "text-teal-400"}>
+            {totalTopicalRaws < (settings.moq["TOPICAL RAWS"]?.qty ?? 50)
+              ? `MOQ: ${(settings.moq["TOPICAL RAWS"]?.qty ?? 50) - totalTopicalRaws}g more needed across all items`
               : topicalRawsVarieties10g > 0
-                ? `${topicalRawsVarieties10g} variet${topicalRawsVarieties10g === 1 ? "y" : "ies"} at 10g · +₱50 each`
-                : `+₱50 per variety at 10g`}
+                ? `${topicalRawsVarieties10g} variet${topicalRawsVarieties10g === 1 ? "y" : "ies"} at ${settings.handlingFees.topicalRaws.varietyThreshold}g · +₱${settings.handlingFees.topicalRaws.perVarietyIncrement} each`
+                : `+₱${settings.handlingFees.topicalRaws.perVarietyIncrement} per variety at ${settings.handlingFees.topicalRaws.varietyThreshold}g`}
           </span>
           <div className="mt-1.5 w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
             <div className={`h-full rounded-full transition-all ${totalTopicalRaws >= 50 ? "bg-emerald-400" : "bg-teal-400"}`} style={{ width: `${Math.min(100, Math.round((totalTopicalRaws / 50) * 100))}%` }} />
@@ -1014,11 +1003,14 @@ export default function OrderForm() {
       <div className="shrink-0 bg-gradient-to-r from-rose-600 to-purple-700 px-4 py-2.5 text-center z-10">
         <p className="text-[10px] font-bold uppercase tracking-widest text-white/60 mb-1.5">Minimum Order Requirements</p>
         <div className="flex items-center justify-center gap-2 flex-wrap">
-          {(Object.entries(MOQ) as [Category, { qty: number; unit: string }][]).map(([cat, { qty, unit }]) => (
-            <span key={cat} className="bg-white/20 border border-white/30 text-white px-2.5 py-0.5 rounded-full text-[11px] font-bold">
-              {CATEGORY_META[cat].emoji} {cat}: <span className="font-extrabold">{qty} {unit}</span>
-            </span>
-          ))}
+          {CATEGORIES.filter((cat) => settings.moq[cat]).map((cat) => {
+            const { qty, unit } = settings.moq[cat];
+            return (
+              <span key={cat} className="bg-white/20 border border-white/30 text-white px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                {CATEGORY_META[cat].emoji} {cat}: <span className="font-extrabold">{qty} {unit}</span>
+              </span>
+            );
+          })}
         </div>
       </div>
 
@@ -1089,7 +1081,7 @@ export default function OrderForm() {
             <div className="px-3 py-3 border-t border-gray-100 space-y-2.5">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest px-1">Batch Progress</p>
               {CATEGORIES.map((cat) => {
-                const moq = MOQ[cat];
+                const moq = settings.moq[cat];
                 if (!moq) return null;
                 const total = batchTotals.get(cat) || 0;
                 const pct = Math.min(100, Math.round((total / moq.qty) * 100));

@@ -82,3 +82,29 @@ export interface ConsolidationReport {
   totalHandling: number;
   paidHandlingTotal: number;
 }
+
+export interface AppSettings {
+  moq: Record<string, { qty: number; unit: string }>;
+  handlingFees: {
+    pens:        { baseFee: number; tierSize: number; tierIncrement: number };
+    uspBac:      { tierSize: number; feePerTier: number };
+    topicalRaws: { baseFee: number; varietyThreshold: number; perVarietyIncrement: number };
+    cosmetics:   { bulkThreshold: number; bulkDiscount: number };
+  };
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  moq: {
+    "USP BAC":      { qty: 100, unit: "ampoules" },
+    COSMETICS:      { qty: 30,  unit: "boxes" },
+    SERUMS:         { qty: 10,  unit: "kits" },
+    PENS:           { qty: 30,  unit: "pens" },
+    "TOPICAL RAWS": { qty: 50,  unit: "g total" },
+  },
+  handlingFees: {
+    pens:        { baseFee: 150, tierSize: 5,  tierIncrement: 50 },
+    uspBac:      { tierSize: 50, feePerTier: 50 },
+    topicalRaws: { baseFee: 150, varietyThreshold: 10, perVarietyIncrement: 50 },
+    cosmetics:   { bulkThreshold: 3, bulkDiscount: 100 },
+  },
+};
