@@ -5,14 +5,26 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { OrderStatus, OrderItem } from "@/lib/types";
 
-const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "paid", "fulfilled", "cancelled"];
+const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "partially_paid", "paid", "partially_fulfilled", "fulfilled", "cancelled"];
+
+const STATUS_LABELS: Record<string, string> = {
+  pending:              "Pending",
+  waiting:              "Waiting",
+  partially_paid:       "Partially Paid",
+  paid:                 "Paid",
+  partially_fulfilled:  "Partially Fulfilled",
+  fulfilled:            "Fulfilled",
+  cancelled:            "Cancelled",
+};
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:   "bg-yellow-100 text-yellow-700",
-  waiting:   "bg-orange-100 text-orange-700",
-  paid:      "bg-blue-100 text-blue-700",
-  fulfilled: "bg-green-100 text-green-700",
-  cancelled: "bg-gray-100 text-gray-500",
+  pending:              "bg-yellow-100 text-yellow-700",
+  waiting:              "bg-orange-100 text-orange-700",
+  partially_paid:       "bg-indigo-100 text-indigo-700",
+  paid:                 "bg-blue-100 text-blue-700",
+  partially_fulfilled:  "bg-teal-100 text-teal-700",
+  fulfilled:            "bg-green-100 text-green-700",
+  cancelled:            "bg-gray-100 text-gray-500",
   // backwards compat
   confirmed: "bg-orange-100 text-orange-700",
   delivered: "bg-green-100 text-green-700",
@@ -198,13 +210,13 @@ export default function OrderDetailPage() {
               <button
                 key={s}
                 onClick={() => setStatus(s)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition-all ${
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
                   status === s
                     ? STATUS_COLORS[s] + " ring-2 ring-offset-1 ring-current"
                     : "bg-gray-100 text-gray-500"
                 }`}
               >
-                {s}
+                {STATUS_LABELS[s] || s}
               </button>
             ))}
           </div>

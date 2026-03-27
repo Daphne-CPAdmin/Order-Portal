@@ -26,16 +26,26 @@ interface OrderDetail extends OrderRow {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "paid", "fulfilled", "cancelled"];
+const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "partially_paid", "paid", "partially_fulfilled", "fulfilled", "cancelled"];
+
+const STATUS_LABELS: Record<string, string> = {
+  pending:              "Pending",
+  waiting:              "Waiting",
+  partially_paid:       "Partially Paid",
+  paid:                 "Paid",
+  partially_fulfilled:  "Partially Fulfilled",
+  fulfilled:            "Fulfilled",
+  cancelled:            "Cancelled",
+};
 
 const STATUS_COLORS: Record<string, string> = {
   pending:              "bg-yellow-100 text-yellow-700",
   waiting:              "bg-orange-100 text-orange-700",
+  partially_paid:       "bg-indigo-100 text-indigo-700",
   paid:                 "bg-blue-100 text-blue-700",
+  partially_fulfilled:  "bg-teal-100 text-teal-700",
   fulfilled:            "bg-green-100 text-green-700",
   cancelled:            "bg-gray-100 text-gray-500",
-  partially_paid:       "bg-indigo-100 text-indigo-700",
-  partially_fulfilled:  "bg-teal-100 text-teal-700",
   // backwards compat
   confirmed: "bg-orange-100 text-orange-700",
   delivered: "bg-green-100 text-green-700",
@@ -556,7 +566,7 @@ export default function OrdersPage() {
             <div className="flex gap-2 flex-wrap">
               {STATUS_OPTIONS.map((s) => (
                 <div key={s} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${STATUS_COLORS[s]}`}>
-                  <span className="capitalize">{s}</span>
+                  <span>{STATUS_LABELS[s] || s}</span>
                   <span className="bg-white/60 rounded-full px-1.5 font-bold">{summaryStats.statusCounts[s]}</span>
                 </div>
               ))}
@@ -589,11 +599,11 @@ export default function OrdersPage() {
               <button
                 key={s}
                 onClick={() => setStatusFilter(s as OrderStatus | "all")}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize ${
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${
                   statusFilter === s ? "bg-gray-800 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
               >
-                {s === "all" ? "All" : s}
+                {s === "all" ? "All" : (STATUS_LABELS[s] || s)}
               </button>
             ))}
           </div>
@@ -669,8 +679,8 @@ export default function OrdersPage() {
                         ₱{formatPrice(order.grandTotal || order.subtotal)}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[order.status]}`}>
-                          {order.status}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[order.status]}`}>
+                          {STATUS_LABELS[order.status] || order.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -780,13 +790,13 @@ export default function OrdersPage() {
                       <button
                         key={s}
                         onClick={() => setEditStatus(s)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition-all ${
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
                           editStatus === s
                             ? STATUS_COLORS[s] + " ring-2 ring-offset-1 ring-current"
                             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                         }`}
                       >
-                        {s}
+                        {STATUS_LABELS[s] || s}
                       </button>
                     ))}
                   </div>

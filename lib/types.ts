@@ -35,7 +35,7 @@ export interface Batch {
   createdDate: string;
 }
 
-export type OrderStatus = "pending" | "waiting" | "paid" | "fulfilled" | "cancelled";
+export type OrderStatus = "pending" | "waiting" | "partially_paid" | "paid" | "partially_fulfilled" | "fulfilled" | "cancelled";
 
 export type CategoryStatus = "pending" | "partially_paid" | "paid" | "partially_fulfilled" | "fulfilled";
 

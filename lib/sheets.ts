@@ -563,10 +563,15 @@ export async function updateCategoryStatus(
     let newOverallStatus: OrderStatus;
     if (statuses.every((s) => s === "fulfilled")) {
       newOverallStatus = "fulfilled";
+    } else if (
+      statuses.every((s) => s === "paid" || s === "fulfilled" || s === "partially_fulfilled") &&
+      statuses.some((s) => s === "partially_fulfilled" || s === "fulfilled")
+    ) {
+      newOverallStatus = "partially_fulfilled";
     } else if (statuses.every((s) => s === "paid" || s === "fulfilled")) {
       newOverallStatus = "paid";
-    } else if (statuses.some((s) => s !== "pending")) {
-      newOverallStatus = "waiting";
+    } else if (statuses.some((s) => s === "partially_paid" || s === "paid" || s === "partially_fulfilled" || s === "fulfilled")) {
+      newOverallStatus = "partially_paid";
     } else {
       newOverallStatus = "pending";
     }
