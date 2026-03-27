@@ -37,6 +37,8 @@ export interface Batch {
 
 export type OrderStatus = "pending" | "waiting" | "paid" | "fulfilled" | "cancelled";
 
+export type CategoryStatus = "pending" | "partially_paid" | "paid" | "partially_fulfilled" | "fulfilled";
+
 export interface OrderItem {
   id: string;
   orderId: string;
@@ -46,7 +48,7 @@ export interface OrderItem {
   pricePerVial: number;
   vialsPerKit: number;
   handlingFee?: number;
-  categoryStatus?: string;
+  categoryStatus?: CategoryStatus;
 }
 
 export interface OrderWithItems extends Order {

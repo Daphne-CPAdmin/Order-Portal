@@ -29,15 +29,25 @@ interface OrderDetail extends OrderRow {
 const STATUS_OPTIONS: OrderStatus[] = ["pending", "waiting", "paid", "fulfilled", "cancelled"];
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:   "bg-yellow-100 text-yellow-700",
-  waiting:   "bg-orange-100 text-orange-700",
-  paid:      "bg-blue-100 text-blue-700",
-  fulfilled: "bg-green-100 text-green-700",
-  cancelled: "bg-gray-100 text-gray-500",
+  pending:              "bg-yellow-100 text-yellow-700",
+  waiting:              "bg-orange-100 text-orange-700",
+  paid:                 "bg-blue-100 text-blue-700",
+  fulfilled:            "bg-green-100 text-green-700",
+  cancelled:            "bg-gray-100 text-gray-500",
+  partially_paid:       "bg-indigo-100 text-indigo-700",
+  partially_fulfilled:  "bg-teal-100 text-teal-700",
   // backwards compat
   confirmed: "bg-orange-100 text-orange-700",
   delivered: "bg-green-100 text-green-700",
 };
+
+const CAT_STATUS_OPTIONS = [
+  { value: "pending",              label: "Pending",          color: "bg-gray-100 text-gray-500 border border-gray-200" },
+  { value: "partially_paid",       label: "½ Paid",           color: "bg-indigo-50 text-indigo-700 border border-indigo-200" },
+  { value: "paid",                 label: "Paid",             color: "bg-blue-50 text-blue-700 border border-blue-200" },
+  { value: "partially_fulfilled",  label: "½ Fulfilled",      color: "bg-teal-50 text-teal-700 border border-teal-200" },
+  { value: "fulfilled",            label: "Fulfilled",        color: "bg-green-50 text-green-700 border border-green-200" },
+] as const;
 
 const CATEGORY_EMOJI: Record<string, string> = {
   "USP BAC": "💉",
@@ -332,25 +342,27 @@ export default function OrdersPage() {
         body: JSON.stringify({ category, status }),
       });
       if (res.ok) {
-        setPanelSuccess(`${category} marked as ${status}.`);
+        const statusLabel = status.replace("_", " ");
+        setPanelSuccess(`${category} marked as ${statusLabel}.`);
         setPanelOrder((prev) => {
           if (!prev) return prev;
-          return {
-            ...prev,
-            items: prev.items.map((i) =>
-              i.category === category ? { ...i, categoryStatus: status } : i
-            ),
-            status: status === "paid" && prev.items.every((i) => i.category === category || i.categoryStatus === "paid")
-              ? "paid"
-              : status === "waiting" || status === "paid"
-                ? "waiting"
-                : prev.status,
-          };
+          const updatedItems = prev.items.map((i) =>
+            i.category === category ? { ...i, categoryStatus: status as OrderItem["categoryStatus"] } : i
+          );
+          // Derive new overall status from updated category statuses
+          const catStatuses = [...new Map(updatedItems.map((i) => [i.category, i.categoryStatus || "pending"])).values()];
+          let newOverall: OrderStatus;
+          if (catStatuses.every((s) => s === "fulfilled")) newOverall = "fulfilled";
+          else if (catStatuses.every((s) => s === "paid" || s === "fulfilled")) newOverall = "paid";
+          else if (catStatuses.some((s) => s !== "pending")) newOverall = "waiting";
+          else newOverall = "pending";
+          return { ...prev, items: updatedItems, status: newOverall };
         });
         setOrders((prev) =>
           prev.map((o) => {
             if (o.id !== orderId) return o;
-            return { ...o, status: status === "paid" ? "waiting" : o.status };
+            const isProgress = status !== "pending";
+            return { ...o, status: isProgress ? "waiting" : o.status };
           })
         );
       } else {
@@ -798,32 +810,28 @@ export default function OrdersPage() {
                           return (
                             <div key={cat} className="bg-gray-50 rounded-xl overflow-hidden border border-gray-100">
                               {/* Category header */}
-                              <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
-                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{CATEGORY_EMOJI[cat] || ""} {cat}</span>
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                    catStatus === "paid"    ? "bg-blue-100 text-blue-700" :
-                                    catStatus === "waiting" ? "bg-orange-100 text-orange-700" :
-                                    "bg-gray-200 text-gray-500"
-                                  }`}>{catStatus}</span>
-                                  {catStatus !== "paid" && (
-                                    <button
-                                      onClick={() => handleCategoryStatus(panelOrder.id, cat, "paid")}
-                                      disabled={updatingCatKey === catKey}
-                                      className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 transition-colors"
-                                    >
-                                      {updatingCatKey === catKey ? "…" : "✅ Mark Paid"}
-                                    </button>
+                              <div className="px-4 py-2 bg-gray-100 border-b border-gray-200">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{CATEGORY_EMOJI[cat] || ""} {cat}</span>
+                                  {updatingCatKey === catKey && (
+                                    <span className="text-[9px] text-gray-400 italic">Saving…</span>
                                   )}
-                                  {catStatus === "paid" && (
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {CAT_STATUS_OPTIONS.map((opt) => (
                                     <button
-                                      onClick={() => handleCategoryStatus(panelOrder.id, cat, "pending")}
+                                      key={opt.value}
+                                      onClick={() => catStatus !== opt.value && handleCategoryStatus(panelOrder.id, cat, opt.value)}
                                       disabled={updatingCatKey === catKey}
-                                      className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                                      className={`text-[9px] font-semibold px-2 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
+                                        catStatus === opt.value
+                                          ? opt.color + " ring-1 ring-offset-1 ring-current font-bold"
+                                          : "bg-white text-gray-400 border border-gray-200 hover:bg-gray-50"
+                                      }`}
                                     >
-                                      {updatingCatKey === catKey ? "…" : "↩ Revert"}
+                                      {opt.label}
                                     </button>
-                                  )}
+                                  ))}
                                 </div>
                               </div>
                               {/* Items */}

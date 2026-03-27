@@ -281,7 +281,7 @@ export async function getOrderItems(orderId?: string, batchId?: string): Promise
         pricePerVial: parseFloat(row[8]) || 0,
         vialsPerKit: vialsMap.get(productName.trim().toLowerCase()) || 1,
         handlingFee: parseFloat(row[9]) || 0, // J: handling_fee (per-category flat fee)
-        categoryStatus: row[13] || "pending",  // N: category_status
+        categoryStatus: (row[13] || "pending") as import("./types").CategoryStatus,  // N: category_status
       });
     }
     // If orderId specified and we found items, stop searching further sheets
@@ -561,9 +561,11 @@ export async function updateCategoryStatus(
     }
     const statuses = [...categoryStatuses.values()];
     let newOverallStatus: OrderStatus;
-    if (statuses.every((s) => s === "paid")) {
+    if (statuses.every((s) => s === "fulfilled")) {
+      newOverallStatus = "fulfilled";
+    } else if (statuses.every((s) => s === "paid" || s === "fulfilled")) {
       newOverallStatus = "paid";
-    } else if (statuses.some((s) => s === "waiting" || s === "paid")) {
+    } else if (statuses.some((s) => s !== "pending")) {
       newOverallStatus = "waiting";
     } else {
       newOverallStatus = "pending";
@@ -593,7 +595,7 @@ export async function updateCategoryStatus(
         requestBody: { valueInputOption: "USER_ENTERED", data: updateData },
       });
     }
-    if (newCategoryStatus === "paid") {
+    if (newCategoryStatus === "paid" || newCategoryStatus === "fulfilled") {
       await setCategoryLock(sheetName, category, true);
     }
     return;
